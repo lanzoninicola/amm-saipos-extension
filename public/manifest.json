@@ -1,16 +1,15 @@
 {
   "manifest_version": 3,
-  "name": "A Modo Mio - Assistente intelligente de Mogo",
+  "name": "A Modo Mio - Assistente intelligente de Saipos",
   "version": "1.0",
-  "description": "Mogo assistant.",
+  "description": "Saipos assistant.",
   "permissions": [
     "storage",
     "activeTab",
     "scripting"
   ],
   "host_permissions": [
-    "https://app3.mogogourmet.com.br/*",
-    "https://jsonplaceholder.typicode.com/*"
+    "https://conta.saipos.com/*"
   ],
   "background": {
     "service_worker": "background.js"
@@ -22,7 +21,7 @@
   "content_scripts": [
     {
       "matches": [
-        "https://app3.mogogourmet.com.br/*"
+        "https://conta.saipos.com/*"
       ],
       "js": [
         "main.js"
@@ -35,7 +34,7 @@
         "content.js"
       ],
       "matches": [
-        "https://app3.mogogourmet.com.br/*"
+        "https://conta.saipos.com/*"
       ]
     }
   ]
