@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "A Modo Mio - Assistente intelligente de Mogo",
+  "version": "1.0",
+  "description": "Mogo assistant.",
+  "permissions": [
+    "storage",
+    "activeTab",
+    "scripting"
+  ],
+  "host_permissions": [
+    "https://app3.mogogourmet.com.br/*",
+    "https://jsonplaceholder.typicode.com/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "index.html",
+    "default_icon": "icon.png"
+  },
+  "content_scripts": [
+    {
+      "matches": [
+        "https://app3.mogogourmet.com.br/*"
+      ],
+      "js": [
+        "main.js"
+      ]
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": [
+        "content.js"
+      ],
+      "matches": [
+        "https://app3.mogogourmet.com.br/*"
+      ]
+    }
+  ]
+}
