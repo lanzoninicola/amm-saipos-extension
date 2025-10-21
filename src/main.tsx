@@ -16,5 +16,8 @@ ReactDOM.createRoot(container).render(
   </React.StrictMode>
 );
 
-// inicializa o observador que injeta os botões ao lado do telefone
+// ✅ Inicializa botões de WhatsApp
 initWhatsAppButtonsReact();
+
+// ✅ Inicializa estilização do tempo de produção
+// initProductionTime();
