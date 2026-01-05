@@ -9,7 +9,9 @@
     "scripting"
   ],
   "host_permissions": [
-    "https://conta.saipos.com/*"
+    "https://conta.saipos.com/*",
+    "https://amodomio.com.br/*",
+    "https://www.amodomio.com.br/*"
   ],
   "background": {
     "service_worker": "background.js"

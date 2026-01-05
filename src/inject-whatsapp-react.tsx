@@ -1,7 +1,9 @@
 // inject-whatsapp-react.tsx
-import { MessageCircle, Copy, MessageSquarePlus, Check } from "lucide-react";
+import { MessageSquarePlus, Settings } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
+
+declare const chrome: any;
 
 /** Seletores do DOM renderizado */
 const PHONE_SELECTOR = 'span[data-qa="sale-customer-phone"]';
@@ -17,6 +19,11 @@ const QUICK_REPLIES: string[] = [
     "Obrigado pela preferência! 🙏 Qualquer dúvida é só chamar."
 ];
 
+const STORAGE_KEYS = {
+    endpoint: "amodomio-zapi-endpoint",
+    apiKey: "amodomio-zapi-api-key"
+};
+
 /** Normaliza para E.164 (Brasil por padrão) */
 function toE164(text: string): string {
     let digits = (text || "").replace(/\D/g, "");
@@ -25,95 +32,73 @@ function toE164(text: string): string {
     return digits;
 }
 
-/** Util: abre WhatsApp Web com texto pré-preenchido */
-function openWhatsApp(phoneText: string, message?: string) {
-    const e164 = toE164(phoneText);
-    if (!e164) return;
-    const base = "https://web.whatsapp.com/send";
-    const params = new URLSearchParams({ phone: e164 });
-    if (message && message.trim()) params.set("text", message);
-    const url = `${base}?${params.toString()}`;
-    window.open(url, "_blank", "noopener");
+function getStoredConfig() {
+    return {
+        endpoint: (localStorage.getItem(STORAGE_KEYS.endpoint) || "").trim(),
+        apiKey: (localStorage.getItem(STORAGE_KEYS.apiKey) || "").trim()
+    };
 }
 
-/** Botão WhatsApp (ícone) */
-function WhatsAppIconButton({ phone }: { phone: string }) {
-    const e164 = toE164(phone);
-    if (!e164) return null;
-
-    const btnStyle: React.CSSProperties = {
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 28,
-        height: 28,
-        borderRadius: 6,
-        background: "#25D366",
-        color: "#fff",
-        flex: "0 0 auto",
-        borderWidth: "0px"
-    };
-
-    return (
-        <button
-            type="button"
-            title="Abrir no WhatsApp Web"
-            onClick={() => openWhatsApp(phone)}
-            style={btnStyle}
-        >
-            <MessageCircle size={18} />
-        </button>
-    );
+function saveStoredConfig({ endpoint, apiKey }: { endpoint: string; apiKey: string }) {
+    localStorage.setItem(STORAGE_KEYS.endpoint, endpoint.trim());
+    localStorage.setItem(STORAGE_KEYS.apiKey, apiKey.trim());
 }
 
-/** Botão de copiar número */
-function CopyPhoneButton({ phone }: { phone: string }) {
+async function sendViaBackground(
+    phone: string,
+    message: string,
+    config?: { endpoint: string; apiKey: string }
+) {
     const e164 = toE164(phone);
-    if (!e164) return null;
+    if (!e164) throw new Error("Telefone inválido para envio");
 
-    const [ok, setOk] = useState(false);
+    const endpoint = config?.endpoint?.trim() || getStoredConfig().endpoint;
+    const apiKey = config?.apiKey?.trim() || getStoredConfig().apiKey;
 
-    const btnStyle: React.CSSProperties = {
-        display: "inline-flex",
-        alignItems: "center",
-        justifyContent: "center",
-        width: 28,
-        height: 28,
-        borderRadius: 6,
-        background: "#0055ff",
-        color: "#fff",
-        flex: "0 0 auto",
-        cursor: "pointer",
-        borderWidth: 0
-    };
+    if (!endpoint || !apiKey) throw new Error("Configure endpoint e API key");
 
-    const handleCopy = async () => {
-        try {
-            await navigator.clipboard.writeText(e164);
-            setOk(true);
-            setTimeout(() => setOk(false), 1200);
-        } catch {
-            setOk(false);
-        }
-    };
+    const runtime = typeof chrome !== "undefined" && chrome?.runtime ? chrome.runtime : null;
+    if (!runtime) throw new Error("chrome.runtime indisponível");
 
-    return (
-        <button type="button" onClick={handleCopy} title="Copiar número de telefone" style={btnStyle}>
-            {ok ? <Check size={16} /> : <Copy size={16} />}
-        </button>
-    );
+    return new Promise<{ ok: boolean }>((resolve, reject) => {
+        runtime.sendMessage(
+            {
+                type: "ZAPI_SEND_TEXT",
+                endpoint,
+                apiKey,
+                phone: e164,
+                message
+            },
+            (response: { error?: string }) => {
+                const lastErr = runtime?.lastError;
+                if (lastErr) {
+                    reject(new Error(lastErr.message));
+                    return;
+                }
+                if (response?.error) {
+                    reject(new Error(response.error));
+                    return;
+                }
+                resolve({ ok: true });
+            }
+        );
+    });
 }
 
 /** Botão + dropdown de Respostas Rápidas */
 function QuickReplies({ phone }: { phone: string }) {
-    const [open, setOpen] = useState(false);
+    const [menu, setMenu] = useState<"quick" | "settings" | null>(null);
     const ref = useRef<HTMLDivElement | null>(null);
+    const [endpoint, setEndpoint] = useState(() => getStoredConfig().endpoint);
+    const [apiKey, setApiKey] = useState(() => getStoredConfig().apiKey);
+    const [status, setStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
+    const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
     useEffect(() => {
         const onClickOutside = (e: MouseEvent) => {
             if (!ref.current) return;
             if (e.target instanceof Node && !ref.current.contains(e.target)) {
-                setOpen(false);
+                setMenu(null);
             }
         };
         document.addEventListener("click", onClickOutside);
@@ -131,7 +116,6 @@ function QuickReplies({ phone }: { phone: string }) {
         color: "#fff",
         flex: "0 0 auto",
         cursor: "pointer",
-        position: "relative",
         borderWidth: "0px"
     };
 
@@ -158,21 +142,93 @@ function QuickReplies({ phone }: { phone: string }) {
         userSelect: "none" as const
     };
 
+    const fieldStyle: React.CSSProperties = {
+        display: "flex",
+        flexDirection: "column",
+        gap: "6px",
+        padding: "4px 2px"
+    };
+
+    const labelStyle: React.CSSProperties = {
+        fontSize: 11,
+        color: "#374151"
+    };
+
+    const inputStyle: React.CSSProperties = {
+        width: "100%",
+        borderRadius: 6,
+        border: "1px solid rgba(0,0,0,0.14)",
+        padding: "8px 10px",
+        fontSize: 12
+    };
+
+    const saveButtonStyle: React.CSSProperties = {
+        marginTop: 8,
+        width: "100%",
+        padding: "8px 10px",
+        borderRadius: 6,
+        borderWidth: 0,
+        background: "#2563eb",
+        color: "#fff",
+        cursor: "pointer",
+        fontSize: 12,
+        fontWeight: 600 as const
+    };
+
+    const badgeStyle: React.CSSProperties = {
+        marginLeft: 6,
+        fontSize: 11,
+        color: status === "ok" ? "#16a34a" : status === "error" ? "#dc2626" : "#6b7280"
+    };
+
+    const handleSend = async (text: string) => {
+        setStatus("sending");
+        setErrorMsg(null);
+        try {
+            await sendViaBackground(phone, text, { endpoint, apiKey });
+            setStatus("ok");
+            setTimeout(() => setStatus("idle"), 1200);
+        } catch (err) {
+            setStatus("error");
+            setErrorMsg(err instanceof Error ? err.message : "Falha ao enviar");
+            setTimeout(() => setStatus("idle"), 1500);
+        } finally {
+            setMenu(null);
+        }
+    };
+
+    const handleSave = () => {
+        saveStoredConfig({ endpoint, apiKey });
+        setMenu(null);
+    };
+
     return (
-        <div ref={ref} style={{ position: "relative" }}>
+        <div ref={ref} style={{ position: "relative", display: "flex", alignItems: "center", gap: "6px" }}>
             <button
                 type="button"
                 title="Respostas rápidas"
                 style={btnStyle}
                 onClick={(e) => {
                     e.stopPropagation();
-                    setOpen((v) => !v);
+                    setMenu((prev) => (prev === "quick" ? null : "quick"));
                 }}
             >
                 <MessageSquarePlus size={16} />
             </button>
 
-            {open && (
+            <button
+                type="button"
+                title="Configurar endpoint e API key"
+                style={{ ...btnStyle, background: "#374151" }}
+                onClick={(e) => {
+                    e.stopPropagation();
+                    setMenu((prev) => (prev === "settings" ? null : "settings"));
+                }}
+            >
+                <Settings size={16} />
+            </button>
+
+            {menu === "quick" && (
                 <div style={menuStyle} onClick={(e) => e.stopPropagation()}>
                     {QUICK_REPLIES.map((text, i) => (
                         <div
@@ -181,13 +237,59 @@ function QuickReplies({ phone }: { phone: string }) {
                             onMouseEnter={(e) => ((e.currentTarget.style.background = "rgba(0,0,0,0.05)"))}
                             onMouseLeave={(e) => ((e.currentTarget.style.background = "transparent"))}
                             onClick={() => {
-                                openWhatsApp(phone, text);
-                                setOpen(false);
+                                handleSend(text);
                             }}
                         >
                             {text}
                         </div>
                     ))}
+                    <div style={{ ...itemStyle, cursor: "default", background: "rgba(0,0,0,0.02)", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                        <span style={{ color: "#4b5563" }}>
+                            {status === "sending" && "Enviando..."}
+                            {status === "ok" && "Enviado"}
+                            {status === "error" && (errorMsg || "Erro ao enviar")}
+                            {status === "idle" && "Z-API"}
+                        </span>
+                        <span style={badgeStyle}>{status === "idle" ? "" : status.toUpperCase()}</span>
+                    </div>
+                </div>
+            )}
+
+            {menu === "settings" && (
+                <div style={{ ...menuStyle, minWidth: "280px" }} onClick={(e) => e.stopPropagation()}>
+                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Config Z-API</div>
+                    <div style={fieldStyle}>
+                        <label style={labelStyle} htmlFor="zapi-endpoint">
+                            Endpoint
+                        </label>
+                        <input
+                            id="zapi-endpoint"
+                            type="text"
+                            style={inputStyle}
+                            value={endpoint}
+                            onChange={(e) => setEndpoint(e.target.value)}
+                            className="placeholder:text-muted-foreground"
+                            placeholder="https://amodomio.com.br/api/messages/text"
+                        />
+                    </div>
+                    <div style={fieldStyle}>
+                        <label style={labelStyle} htmlFor="zapi-apikey">
+                            API key
+                        </label>
+                        <input
+                            id="zapi-apikey"
+                            type="text"
+                            style={inputStyle}
+                            value={apiKey}
+                            onChange={(e) => setApiKey(e.target.value)}
+                            className="placeholder:text-muted-foreground"
+                            placeholder="api-key"
+                        />
+                    </div>
+                    <button type="button" style={saveButtonStyle} onClick={handleSave}>
+                        Salvar
+                    </button>
+                    {errorMsg && <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 6 }}>{errorMsg}</div>}
                 </div>
             )}
         </div>
@@ -236,14 +338,6 @@ function mountOnCard(phoneEl: HTMLSpanElement) {
     // insere wrapper antes do telefone (telefone será movido para a coluna)
     parent.insertBefore(wrapper, phoneEl);
 
-    // monta os 3 botões (React)
-    const waMount = document.createElement("div");
-    wrapper.appendChild(waMount);
-    ReactDOM.createRoot(waMount).render(<WhatsAppIconButton phone={phoneText} />);
-
-    const copyMount = document.createElement("div");
-    wrapper.appendChild(copyMount);
-    ReactDOM.createRoot(copyMount).render(<CopyPhoneButton phone={phoneText} />);
 
     const qrMount = document.createElement("div");
     wrapper.appendChild(qrMount);
