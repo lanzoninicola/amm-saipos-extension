@@ -8,6 +8,7 @@ declare const chrome: any;
 /** Seletores do DOM renderizado */
 const PHONE_SELECTOR = 'span[data-qa="sale-customer-phone"]';
 const SALES_SELECTOR = 'small[data-qa="sale-customer-store-sales_count"]';
+const NAME_SELECTOR = 'span[data-qa="sale-name"]';
 
 /** Evita montar duas vezes no mesmo span de telefone */
 const MARK_ATTR = "data-amodomio-wapp";
@@ -16,12 +17,13 @@ const MARK_ATTR = "data-amodomio-wapp";
 const QUICK_REPLIES: string[] = [
     "Posso colocar sua pizza no forno?",
     "O motoboy já saiu para entrega.",
-    "Obrigado pela preferência! 🙏 Qualquer dúvida é só chamar."
+    "Muito obrigado pelo pedido!\n\nAmou a pizza? Deixe sua opinião no Google, sua avaliação em 2 min faz toda a diferença! 🙌\n\n👉 https://g.page/r/CceZSxdctFZHEAE/review"
 ];
 
 const STORAGE_KEYS = {
     endpoint: "amodomio-zapi-endpoint",
-    apiKey: "amodomio-zapi-api-key"
+    apiKey: "amodomio-zapi-api-key",
+    operator: "amodomio-zapi-operator"
 };
 
 /** Normaliza para E.164 (Brasil por padrão) */
@@ -35,13 +37,15 @@ function toE164(text: string): string {
 function getStoredConfig() {
     return {
         endpoint: (localStorage.getItem(STORAGE_KEYS.endpoint) || "").trim(),
-        apiKey: (localStorage.getItem(STORAGE_KEYS.apiKey) || "").trim()
+        apiKey: (localStorage.getItem(STORAGE_KEYS.apiKey) || "").trim(),
+        operator: (localStorage.getItem(STORAGE_KEYS.operator) || "").trim()
     };
 }
 
-function saveStoredConfig({ endpoint, apiKey }: { endpoint: string; apiKey: string }) {
+function saveStoredConfig({ endpoint, apiKey, operator }: { endpoint: string; apiKey: string; operator?: string }) {
     localStorage.setItem(STORAGE_KEYS.endpoint, endpoint.trim());
     localStorage.setItem(STORAGE_KEYS.apiKey, apiKey.trim());
+    localStorage.setItem(STORAGE_KEYS.operator, (operator || "").trim());
 }
 
 async function sendViaBackground(
@@ -86,13 +90,15 @@ async function sendViaBackground(
 }
 
 /** Botão + dropdown de Respostas Rápidas */
-function QuickReplies({ phone }: { phone: string }) {
+function QuickReplies({ phone, customerName }: { phone: string; customerName?: string }) {
     const [menu, setMenu] = useState<"quick" | "settings" | null>(null);
     const ref = useRef<HTMLDivElement | null>(null);
     const [endpoint, setEndpoint] = useState(() => getStoredConfig().endpoint);
     const [apiKey, setApiKey] = useState(() => getStoredConfig().apiKey);
+    const [operator, setOperator] = useState(() => getStoredConfig().operator);
     const [status, setStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [nameState, setNameState] = useState(() => (customerName || "").trim());
 
     useEffect(() => {
         const onClickOutside = (e: MouseEvent) => {
@@ -104,6 +110,12 @@ function QuickReplies({ phone }: { phone: string }) {
         document.addEventListener("click", onClickOutside);
         return () => document.removeEventListener("click", onClickOutside);
     }, []);
+
+    useEffect(() => {
+        if (customerName && customerName.trim()) {
+            setNameState(customerName.trim());
+        }
+    }, [customerName]);
 
     const btnStyle: React.CSSProperties = {
         display: "inline-flex",
@@ -181,11 +193,20 @@ function QuickReplies({ phone }: { phone: string }) {
         color: status === "ok" ? "#16a34a" : status === "error" ? "#dc2626" : "#6b7280"
     };
 
+    const buildMessage = (text: string) => {
+        const name = nameState;
+        const boldName = name ? `*${name}*` : "";
+        const greeting = boldName ? `Olá ${boldName}, ` : "Olá, ";
+        const operatorPrefix = operator.trim() ? `*${operator.trim()} disse:*\n\n` : "";
+        return `${operatorPrefix}${greeting}${text}`;
+    };
+
     const handleSend = async (text: string) => {
         setStatus("sending");
         setErrorMsg(null);
         try {
-            await sendViaBackground(phone, text, { endpoint, apiKey });
+            const finalMsg = buildMessage(text);
+            await sendViaBackground(phone, finalMsg, { endpoint, apiKey });
             setStatus("ok");
             setTimeout(() => setStatus("idle"), 1200);
         } catch (err) {
@@ -198,7 +219,7 @@ function QuickReplies({ phone }: { phone: string }) {
     };
 
     const handleSave = () => {
-        saveStoredConfig({ endpoint, apiKey });
+        saveStoredConfig({ endpoint, apiKey, operator });
         setMenu(null);
     };
 
@@ -286,6 +307,20 @@ function QuickReplies({ phone }: { phone: string }) {
                             placeholder="api-key"
                         />
                     </div>
+                    <div style={fieldStyle}>
+                        <label style={labelStyle} htmlFor="zapi-operator">
+                            Nome do operador (opcional)
+                        </label>
+                        <input
+                            id="zapi-operator"
+                            type="text"
+                            style={inputStyle}
+                            value={operator}
+                            onChange={(e) => setOperator(e.target.value)}
+                            className="placeholder:text-muted-foreground"
+                            placeholder="Fulano"
+                        />
+                    </div>
                     <button type="button" style={saveButtonStyle} onClick={handleSave}>
                         Salvar
                     </button>
@@ -311,6 +346,18 @@ function mountOnCard(phoneEl: HTMLSpanElement) {
 
     if (!salesEl && phoneEl.parentElement) {
         salesEl = phoneEl.parentElement.querySelector(SALES_SELECTOR);
+    }
+
+    // tenta achar nome do cliente em ancestrais
+    let nameText = "";
+    let cursor: HTMLElement | null = phoneEl;
+    while (cursor && cursor !== document.body) {
+        const found = cursor.querySelector<HTMLSpanElement>(NAME_SELECTOR);
+        if (found?.textContent?.trim()) {
+            nameText = found.textContent.trim();
+            break;
+        }
+        cursor = cursor.parentElement;
     }
 
     const parent = phoneEl.parentElement;
@@ -341,7 +388,7 @@ function mountOnCard(phoneEl: HTMLSpanElement) {
 
     const qrMount = document.createElement("div");
     wrapper.appendChild(qrMount);
-    ReactDOM.createRoot(qrMount).render(<QuickReplies phone={phoneText} />);
+    ReactDOM.createRoot(qrMount).render(<QuickReplies phone={phoneText} customerName={nameText} />);
 
     // coluna com telefone + (opcional) sales
     wrapper.appendChild(col);
