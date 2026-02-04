@@ -2,6 +2,8 @@
 import { MessageSquarePlus, Settings } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
+import { baseMenuStyle, fieldStyle, inputStyle, labelStyle, useOutsideClick } from "./common/inject-ui-common";
+import { readStorage, writeStorage } from "./common/storage";
 
 declare const chrome: any;
 
@@ -36,16 +38,16 @@ function toE164(text: string): string {
 
 function getStoredConfig() {
     return {
-        endpoint: (localStorage.getItem(STORAGE_KEYS.endpoint) || "").trim(),
-        apiKey: (localStorage.getItem(STORAGE_KEYS.apiKey) || "").trim(),
-        operator: (localStorage.getItem(STORAGE_KEYS.operator) || "").trim()
+        endpoint: readStorage(STORAGE_KEYS.endpoint),
+        apiKey: readStorage(STORAGE_KEYS.apiKey),
+        operator: readStorage(STORAGE_KEYS.operator)
     };
 }
 
 function saveStoredConfig({ endpoint, apiKey, operator }: { endpoint: string; apiKey: string; operator?: string }) {
-    localStorage.setItem(STORAGE_KEYS.endpoint, endpoint.trim());
-    localStorage.setItem(STORAGE_KEYS.apiKey, apiKey.trim());
-    localStorage.setItem(STORAGE_KEYS.operator, (operator || "").trim());
+    writeStorage(STORAGE_KEYS.endpoint, endpoint);
+    writeStorage(STORAGE_KEYS.apiKey, apiKey);
+    writeStorage(STORAGE_KEYS.operator, operator || "");
 }
 
 async function sendViaBackground(
@@ -100,16 +102,7 @@ function QuickReplies({ phone, customerName }: { phone: string; customerName?: s
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [nameState, setNameState] = useState(() => (customerName || "").trim());
 
-    useEffect(() => {
-        const onClickOutside = (e: MouseEvent) => {
-            if (!ref.current) return;
-            if (e.target instanceof Node && !ref.current.contains(e.target)) {
-                setMenu(null);
-            }
-        };
-        document.addEventListener("click", onClickOutside);
-        return () => document.removeEventListener("click", onClickOutside);
-    }, []);
+    useOutsideClick(ref, () => setMenu(null));
 
     useEffect(() => {
         if (customerName && customerName.trim()) {
@@ -131,19 +124,7 @@ function QuickReplies({ phone, customerName }: { phone: string; customerName?: s
         borderWidth: "0px"
     };
 
-    const menuStyle: React.CSSProperties = {
-        position: "absolute",
-        top: "36px",
-        left: 0,
-        background: "#fff",
-        color: "#111",
-        border: "1px solid rgba(0,0,0,0.12)",
-        borderRadius: 8,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-        minWidth: "240px",
-        zIndex: 9999999,
-        padding: "6px"
-    };
+    const menuStyle: React.CSSProperties = { ...baseMenuStyle, minWidth: "240px" };
 
     const itemStyle: React.CSSProperties = {
         padding: "8px 10px",
@@ -152,26 +133,6 @@ function QuickReplies({ phone, customerName }: { phone: string; customerName?: s
         fontSize: 12,
         lineHeight: "16px",
         userSelect: "none" as const
-    };
-
-    const fieldStyle: React.CSSProperties = {
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-        padding: "4px 2px"
-    };
-
-    const labelStyle: React.CSSProperties = {
-        fontSize: 11,
-        color: "#374151"
-    };
-
-    const inputStyle: React.CSSProperties = {
-        width: "100%",
-        borderRadius: 6,
-        border: "1px solid rgba(0,0,0,0.14)",
-        padding: "8px 10px",
-        fontSize: 12
     };
 
     const saveButtonStyle: React.CSSProperties = {
@@ -359,6 +320,7 @@ function mountOnCard(phoneEl: HTMLSpanElement) {
         }
         cursor = cursor.parentElement;
     }
+
 
     const parent = phoneEl.parentElement;
     if (!parent) return;
