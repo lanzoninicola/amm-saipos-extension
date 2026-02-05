@@ -1,7 +1,8 @@
 import React, { useEffect, useRef, useState } from "react";
 import { RefreshCw } from "lucide-react";
 import ReactDOM from "react-dom/client";
-import { fieldStyle, inputStyle, labelStyle, useOutsideClick } from "./common/inject-ui-common";
+import { createPortal } from "react-dom";
+import { fieldStyle, inputStyle, labelStyle } from "./common/inject-ui-common";
 import { readStorage, writeStorage } from "./common/storage";
 import { extractFirstNumber } from "./common/dom-helpers";
 
@@ -67,13 +68,17 @@ async function sendKdsOrder(payload: Record<string, unknown>, config?: { endpoin
 
 type DeliveryZone = { id: string | number; name?: string; title?: string };
 
-function normalizeMoney(value: string): number {
-    const cleaned = (value || "")
-        .replace(/\s/g, "")
-        .replace(/\./g, "")
-        .replace(",", ".");
-    const parsed = Number(cleaned);
-    return Number.isFinite(parsed) ? parsed : 0;
+const CHANNEL_OPTIONS = ["WHATS/PRESENCIAL/TELE", "CARDAPIO", "AIQFOME", "IFOOD"];
+
+function toCents(value?: number | string | null) {
+    const n =
+        value == null
+            ? 0
+            : typeof value === "number"
+            ? value
+            : Number((value as any)?.toString?.() ?? `${value}`);
+    const finite = Number.isFinite(n) ? n : 0;
+    return Math.max(0, Math.round(finite * 100));
 }
 
 function parseIntOrZero(value: string): number {
@@ -91,15 +96,16 @@ function deriveZonesEndpoint(endpoint: string): string {
 export function KdsSyncButton({
     commandNumber,
     customerName,
-    customerPhone
+    customerPhone,
+    openOnMount
 }: {
     commandNumber?: string;
     customerName?: string;
     customerPhone?: string;
+    openOnMount?: boolean;
 }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
-    const ref = useRef<HTMLDivElement | null>(null);
     const [endpoint, setEndpoint] = useState(() => getStoredKdsConfig().endpoint);
     const [apiKey, setApiKey] = useState(() => getStoredKdsConfig().apiKey);
     const [zonesEndpoint, setZonesEndpoint] = useState(() => getStoredKdsConfig().zonesEndpoint);
@@ -109,10 +115,10 @@ export function KdsSyncButton({
     const [zonesLoading, setZonesLoading] = useState(false);
     const [zonesError, setZonesError] = useState<string | null>(null);
 
-    const [rowId, setRowId] = useState("");
     const [commandValue, setCommandValue] = useState(commandNumber || "");
-    const [orderAmount, setOrderAmount] = useState("");
-    const [motoValue, setMotoValue] = useState("");
+    const [orderAmountCents, setOrderAmountCents] = useState(0);
+    const [motoValueCents, setMotoValueCents] = useState(0);
+    const orderAmountRef = useRef<HTMLInputElement | null>(null);
     const [hasMoto, setHasMoto] = useState(false);
     const [takeAway, setTakeAway] = useState(false);
     const [sizeF, setSizeF] = useState("0");
@@ -126,12 +132,9 @@ export function KdsSyncButton({
     const [customerNameState, setCustomerNameState] = useState(customerName || "");
     const [customerPhoneState, setCustomerPhoneState] = useState(customerPhone || "");
 
-    useOutsideClick(ref, () => {
-        if (modalOpen) {
-            setModalOpen(false);
-            setSettingsOpen(false);
-        }
-    });
+    useEffect(() => {
+        if (openOnMount) setModalOpen(true);
+    }, [openOnMount]);
 
     useEffect(() => {
         if (!modalOpen) return;
@@ -215,13 +218,146 @@ export function KdsSyncButton({
         setSettingsOpen(false);
     };
 
+    const MoneyInputInline = ({
+        valueCents,
+        onChangeCents,
+        placeholder,
+        disabled,
+        inputRef,
+        keepFocus
+    }: {
+        valueCents: number;
+        onChangeCents: (next: number) => void;
+        placeholder?: string;
+        disabled?: boolean;
+        inputRef?: React.RefObject<HTMLInputElement | null>;
+        keepFocus?: boolean;
+    }) => {
+        const display = (valueCents / 100).toLocaleString("pt-BR", {
+            minimumFractionDigits: 2,
+            maximumFractionDigits: 2
+        });
+        const onKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+            e.stopPropagation();
+            if (disabled) return;
+            const k = e.key;
+            if (k === "Enter") return;
+            if (k === "Backspace") {
+                e.preventDefault();
+                onChangeCents(Math.floor(valueCents / 10));
+                requestAnimationFrame(() => inputRef?.current?.focus());
+                return;
+            }
+            if (k === "Delete" || k === "Del" || e.code === "Delete") {
+                e.preventDefault();
+                onChangeCents(0);
+                requestAnimationFrame(() => inputRef?.current?.focus());
+                return;
+            }
+            if (/^\d$/.test(k)) {
+                e.preventDefault();
+                const next = (valueCents * 10 + Number(k)) % 1000000000;
+                onChangeCents(next);
+                requestAnimationFrame(() => inputRef?.current?.focus());
+                return;
+            }
+            if (k === "Tab" || k.startsWith("Arrow") || k === "Home" || k === "End") return;
+            e.preventDefault();
+        };
+        return (
+            <input
+                type="text"
+                inputMode="numeric"
+                value={display}
+                onKeyDown={onKeyDown}
+                onKeyUp={(e) => e.stopPropagation()}
+                onMouseDown={(e) => e.stopPropagation()}
+                onBlur={() => {
+                    if (keepFocus) {
+                        requestAnimationFrame(() => inputRef?.current?.focus());
+                    }
+                }}
+                onChange={() => {}}
+                disabled={disabled}
+                ref={inputRef}
+                style={{
+                    ...inputStyle,
+                    textAlign: "right",
+                    background: disabled ? "#f3f4f6" : inputStyle.background
+                }}
+                placeholder={placeholder}
+            />
+        );
+    };
+
+    const toggleSwitch = (checked: boolean, onChange: (next: boolean) => void, label: string) => (
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+            <span>{label}</span>
+            <span
+                onClick={() => onChange(!checked)}
+                style={{
+                    width: 36,
+                    height: 20,
+                    borderRadius: 999,
+                    background: checked ? "#111827" : "#9ca3af",
+                    position: "relative",
+                    cursor: "pointer",
+                    transition: "all 150ms ease"
+                }}
+            >
+                <span
+                    style={{
+                        position: "absolute",
+                        top: 2,
+                        left: checked ? 18 : 2,
+                        width: 16,
+                        height: 16,
+                        borderRadius: "50%",
+                        background: "#fff",
+                        transition: "left 150ms ease"
+                    }}
+                />
+            </span>
+        </label>
+    );
+
+    const sizeBtn = (label: string, value: string, setValue: (v: string) => void) => {
+        const numeric = parseIntOrZero(value);
+        return (
+            <button
+                type="button"
+                style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 999,
+                    border: "1px solid rgba(0,0,0,0.18)",
+                    background: numeric > 0 ? "#1e40af" : "#fff",
+                    color: numeric > 0 ? "#fff" : "#111827",
+                    fontWeight: 700,
+                    fontSize: 12,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 4
+                }}
+                onClick={() => setValue(String(numeric + 1))}
+                onContextMenu={(e) => {
+                    e.preventDefault();
+                    setValue(String(Math.max(0, numeric - 1)));
+                }}
+                title="Clique para +1, botão direito para -1"
+            >
+                {label}
+                {numeric > 0 && <span style={{ fontSize: 11 }}>{numeric}</span>}
+            </button>
+        );
+    };
+
     const handleSync = async () => {
         setStatus("sending");
         setErrorMsg(null);
         try {
-            const commandNumberNum = parseIntOrZero(commandValue);
-            if (!commandNumberNum) throw new Error("Número da comanda inválido");
-
             const sizes: Record<string, number> = {};
             const sizesMap: Record<string, number> = {
                 F: parseIntOrZero(sizeF),
@@ -235,24 +371,24 @@ export function KdsSyncButton({
             });
 
             const payload: Record<string, unknown> = {
+                _action: "saveRow",
                 date: new Date().toISOString().slice(0, 10),
-                commandNumber: commandNumberNum
+                commandNumber: commandValue || "",
+                orderAmount: (orderAmountCents / 100).toFixed(2),
+                motoValue: (motoValueCents / 100).toFixed(2),
+                hasMoto: hasMoto ? "on" : "",
+                takeAway: takeAway ? "on" : "",
+                sizeF: String(parseIntOrZero(sizeF)),
+                sizeM: String(parseIntOrZero(sizeM)),
+                sizeP: String(parseIntOrZero(sizeP)),
+                sizeI: String(parseIntOrZero(sizeI)),
+                sizeFT: String(parseIntOrZero(sizeFT)),
+                channel: channel || "CARDAPIO",
+                deliveryZoneId: hasMoto ? deliveryZoneId || "" : "",
+                isCreditCard: isCreditCard ? "on" : "",
+                customerName: customerNameState || "",
+                customerPhone: customerPhoneState || ""
             };
-
-            const orderAmountNum = normalizeMoney(orderAmount);
-            const motoValueNum = normalizeMoney(motoValue);
-
-            if (rowId) payload.id = rowId;
-            if (orderAmountNum) payload.orderAmount = orderAmountNum;
-            if (channel) payload.channel = channel;
-            if (Object.keys(sizes).length) payload.sizes = sizes;
-            if (hasMoto) payload.hasMoto = true;
-            if (takeAway) payload.takeAway = true;
-            if (motoValueNum) payload.motoValue = motoValueNum;
-            if (hasMoto && deliveryZoneId) payload.deliveryZoneId = deliveryZoneId;
-            if (isCreditCard) payload.isCreditCard = true;
-            if (customerNameState) payload.customerName = customerNameState;
-            if (customerPhoneState) payload.customerPhone = customerPhoneState;
 
             await sendKdsOrder(payload, { endpoint, apiKey });
             setStatus("ok");
@@ -265,7 +401,7 @@ export function KdsSyncButton({
     };
 
     return (
-        <div ref={ref} style={{ position: "relative" }}>
+        <div style={{ position: "relative" }}>
             <button
                 type="button"
                 title={`Sincronizar pedido no KDS (${status})`}
@@ -278,33 +414,32 @@ export function KdsSyncButton({
                 <RefreshCw size={16} />
             </button>
 
-            {modalOpen && (
-                <div
-                    style={{
-                        position: "fixed",
-                        inset: 0,
-                        background: "rgba(0,0,0,0.25)",
-                        zIndex: 9999998
-                    }}
-                    onClick={() => {
-                        setModalOpen(false);
-                        setSettingsOpen(false);
-                    }}
-                >
+            {modalOpen &&
+                createPortal(
                     <div
                         style={{
-                            position: "absolute",
-                            top: "20%",
-                            left: "50%",
-                            transform: "translateX(-50%)",
-                            background: "#fff",
-                            borderRadius: 10,
-                            boxShadow: "0 12px 32px rgba(0,0,0,0.2)",
-                            minWidth: 300,
-                            padding: 12
+                            position: "fixed",
+                            inset: 0,
+                            background: "rgba(0,0,0,0.35)",
+                            zIndex: 2147483646,
+                            pointerEvents: "auto"
                         }}
-                        onClick={(e) => e.stopPropagation()}
                     >
+                        <div
+                            style={{
+                                position: "fixed",
+                                top: "20%",
+                                left: "50%",
+                                transform: "translateX(-50%)",
+                                background: "#fff",
+                                borderRadius: 10,
+                                boxShadow: "0 12px 32px rgba(0,0,0,0.2)",
+                                minWidth: 300,
+                                padding: 12,
+                                zIndex: 2147483647,
+                                pointerEvents: "auto"
+                            }}
+                        >
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
                             <div style={{ fontWeight: 700, fontSize: 14 }}>Pedido no KDS</div>
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
@@ -348,19 +483,6 @@ export function KdsSyncButton({
 
                         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
                             <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-row-id">
-                                    ID
-                                </label>
-                                <input
-                                    id="kds-row-id"
-                                    type="text"
-                                    style={inputStyle}
-                                    value={rowId}
-                                    onChange={(e) => setRowId(e.target.value)}
-                                    placeholder="ID da linha"
-                                />
-                            </div>
-                            <div style={fieldStyle}>
                                 <label style={labelStyle} htmlFor="kds-command">
                                     Comanda
                                 </label>
@@ -378,132 +500,74 @@ export function KdsSyncButton({
                                 <label style={labelStyle} htmlFor="kds-order-amount">
                                     Valor pedido
                                 </label>
-                                <input
-                                    id="kds-order-amount"
-                                    type="text"
-                                    inputMode="decimal"
-                                    style={inputStyle}
-                                    value={orderAmount}
-                                    onChange={(e) => setOrderAmount(e.target.value)}
+                                <MoneyInputInline
+                                    valueCents={orderAmountCents}
+                                    onChangeCents={setOrderAmountCents}
                                     placeholder="0,00"
+                                    inputRef={orderAmountRef}
+                                    keepFocus
                                 />
                             </div>
+                        </div>
+                        <div style={{ marginBottom: 10 }}>
                             <div style={fieldStyle}>
                                 <label style={labelStyle} htmlFor="kds-channel">
                                     Canal
                                 </label>
-                                <input
+                                <select
                                     id="kds-channel"
-                                    type="text"
-                                    style={inputStyle}
+                                    style={{ ...inputStyle, height: 34 }}
                                     value={channel}
                                     onChange={(e) => setChannel(e.target.value)}
-                                    placeholder="CARDAPIO"
-                                />
+                                >
+                                    {CHANNEL_OPTIONS.map((opt) => (
+                                        <option key={opt} value={opt}>
+                                            {opt}
+                                        </option>
+                                    ))}
+                                </select>
                             </div>
                         </div>
 
-                        <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 6, marginBottom: 10 }}>
-                            <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-size-f">
-                                    F
-                                </label>
-                                <input
-                                    id="kds-size-f"
-                                    type="number"
-                                    inputMode="numeric"
-                                    style={inputStyle}
-                                    value={sizeF}
-                                    onChange={(e) => setSizeF(e.target.value)}
-                                />
-                            </div>
-                            <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-size-m">
-                                    M
-                                </label>
-                                <input
-                                    id="kds-size-m"
-                                    type="number"
-                                    inputMode="numeric"
-                                    style={inputStyle}
-                                    value={sizeM}
-                                    onChange={(e) => setSizeM(e.target.value)}
-                                />
-                            </div>
-                            <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-size-p">
-                                    P
-                                </label>
-                                <input
-                                    id="kds-size-p"
-                                    type="number"
-                                    inputMode="numeric"
-                                    style={inputStyle}
-                                    value={sizeP}
-                                    onChange={(e) => setSizeP(e.target.value)}
-                                />
-                            </div>
-                            <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-size-i">
-                                    I
-                                </label>
-                                <input
-                                    id="kds-size-i"
-                                    type="number"
-                                    inputMode="numeric"
-                                    style={inputStyle}
-                                    value={sizeI}
-                                    onChange={(e) => setSizeI(e.target.value)}
-                                />
-                            </div>
-                            <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-size-ft">
-                                    FT
-                                </label>
-                                <input
-                                    id="kds-size-ft"
-                                    type="number"
-                                    inputMode="numeric"
-                                    style={inputStyle}
-                                    value={sizeFT}
-                                    onChange={(e) => setSizeFT(e.target.value)}
-                                />
-                            </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                            {sizeBtn("F", sizeF, setSizeF)}
+                            {sizeBtn("M", sizeM, setSizeM)}
+                            {sizeBtn("P", sizeP, setSizeP)}
+                            {sizeBtn("I", sizeI, setSizeI)}
+                            {sizeBtn("FT", sizeFT, setSizeFT)}
+                            <button
+                                type="button"
+                                style={{
+                                    height: 32,
+                                    padding: "0 10px",
+                                    borderRadius: 999,
+                                    border: "1px solid rgba(0,0,0,0.12)",
+                                    background: "#f3f4f6",
+                                    fontSize: 12,
+                                    cursor: "pointer"
+                                }}
+                                onClick={() => {
+                                    setSizeF("0");
+                                    setSizeM("0");
+                                    setSizeP("0");
+                                    setSizeI("0");
+                                    setSizeFT("0");
+                                }}
+                            >
+                                Zerar
+                            </button>
                         </div>
 
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-                                <input
-                                    type="checkbox"
-                                    checked={hasMoto}
-                                    onChange={(e) => {
-                                        const next = e.target.checked;
-                                        setHasMoto(next);
-                                        if (next) setTakeAway(false);
-                                    }}
-                                />
-                                Delivery
-                            </label>
-                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-                                <input
-                                    type="checkbox"
-                                    checked={takeAway}
-                                    onChange={(e) => {
-                                        const next = e.target.checked;
-                                        setTakeAway(next);
-                                        if (next) setHasMoto(false);
-                                    }}
-                                />
-                                Retirada
-                            </label>
-                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12 }}>
-                                <input
-                                    type="checkbox"
-                                    checked={isCreditCard}
-                                    onChange={(e) => setIsCreditCard(e.target.checked)}
-                                />
-                                Cartão
-                            </label>
+                        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 10 }}>
+                            {toggleSwitch(hasMoto, (next) => {
+                                setHasMoto(next);
+                                if (next) setTakeAway(false);
+                            }, "Delivery")}
+                            {toggleSwitch(takeAway, (next) => {
+                                setTakeAway(next);
+                                if (next) setHasMoto(false);
+                            }, "Retirada")}
+                            {toggleSwitch(isCreditCard, (next) => setIsCreditCard(next), "Cartão")}
                         </div>
 
                         {hasMoto && (
@@ -532,14 +596,11 @@ export function KdsSyncButton({
                                     <label style={labelStyle} htmlFor="kds-moto-value">
                                         Valor moto
                                     </label>
-                                    <input
-                                        id="kds-moto-value"
-                                        type="text"
-                                        inputMode="decimal"
-                                        style={inputStyle}
-                                        value={motoValue}
-                                        onChange={(e) => setMotoValue(e.target.value)}
+                                    <MoneyInputInline
+                                        valueCents={motoValueCents}
+                                        onChangeCents={setMotoValueCents}
                                         placeholder="0,00"
+                                        disabled={!hasMoto}
                                     />
                                 </div>
                             </div>
@@ -643,8 +704,9 @@ export function KdsSyncButton({
 
                         {errorMsg && <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 6 }}>{errorMsg}</div>}
                     </div>
-                </div>
-            )}
+                    </div>,
+                    document.body
+                )}
         </div>
     );
 }
@@ -705,6 +767,38 @@ function scanAll() {
 
 export function initKdsSync() {
     scanAll();
+
+    const isLocalhost =
+        window.location.hostname === "localhost" ||
+        window.location.hostname === "127.0.0.1" ||
+        window.location.hostname === "0.0.0.0";
+    const isDev = typeof import.meta !== "undefined" && (import.meta as any)?.env?.DEV;
+
+    if (isDev || isLocalhost) {
+        const onKeyDown = (e: KeyboardEvent) => {
+            if (!e.ctrlKey || !e.shiftKey || e.key.toLowerCase() !== "k") return;
+            e.preventDefault();
+            let mount = document.getElementById("amodomio-kds-dev-root") as HTMLDivElement | null;
+            if (!mount) {
+                mount = document.createElement("div");
+                mount.id = "amodomio-kds-dev-root";
+                document.body.appendChild(mount);
+            }
+            const existingRoot = (mount as any).__reactRoot as ReturnType<typeof ReactDOM.createRoot> | undefined;
+            const root = existingRoot || ReactDOM.createRoot(mount);
+            (mount as any).__reactRoot = root;
+            root.render(
+                <KdsSyncButton
+                    openOnMount
+                    commandNumber="1"
+                    customerName="Cliente Teste"
+                    customerPhone="(41) 99999-0000"
+                />
+            );
+        };
+        window.addEventListener("keydown", onKeyDown);
+        console.log("[KDS] Hotkey Ctrl+Shift+K habilitado");
+    }
 
     const obs = new MutationObserver((list) => {
         for (const mut of list) {
