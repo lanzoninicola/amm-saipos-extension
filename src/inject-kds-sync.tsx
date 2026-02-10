@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { RefreshCw } from "lucide-react";
+import { Banknote, Bike, CreditCard, Package, RefreshCw, Wallet } from "lucide-react";
 import ReactDOM from "react-dom/client";
 import { createPortal } from "react-dom";
 import { fieldStyle, inputStyle, labelStyle } from "./common/inject-ui-common";
@@ -128,7 +128,7 @@ export function KdsSyncButton({
     const [sizeFT, setSizeFT] = useState("0");
     const [channel, setChannel] = useState("CARDAPIO");
     const [deliveryZoneId, setDeliveryZoneId] = useState("");
-    const [isCreditCard, setIsCreditCard] = useState(false);
+    const [paymentMethod, setPaymentMethod] = useState<"credit" | "debit" | "cash">("credit");
     const [customerNameState, setCustomerNameState] = useState(customerName || "");
     const [customerPhoneState, setCustomerPhoneState] = useState(customerPhone || "");
 
@@ -283,6 +283,8 @@ export function KdsSyncButton({
                 style={{
                     ...inputStyle,
                     textAlign: "right",
+                    width: "100%",
+                    boxSizing: "border-box",
                     background: disabled ? "#f3f4f6" : inputStyle.background
                 }}
                 placeholder={placeholder}
@@ -290,35 +292,32 @@ export function KdsSyncButton({
         );
     };
 
-    const toggleSwitch = (checked: boolean, onChange: (next: boolean) => void, label: string) => (
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
-            <span>{label}</span>
-            <span
-                onClick={() => onChange(!checked)}
-                style={{
-                    width: 36,
-                    height: 20,
-                    borderRadius: 999,
-                    background: checked ? "#111827" : "#9ca3af",
-                    position: "relative",
-                    cursor: "pointer",
-                    transition: "all 150ms ease"
-                }}
-            >
-                <span
-                    style={{
-                        position: "absolute",
-                        top: 2,
-                        left: checked ? 18 : 2,
-                        width: 16,
-                        height: 16,
-                        borderRadius: "50%",
-                        background: "#fff",
-                        transition: "left 150ms ease"
-                    }}
-                />
-            </span>
-        </label>
+    const pillButton = (
+        label: string,
+        active: boolean,
+        onClick: () => void,
+        icon?: React.ReactNode
+    ) => (
+        <button
+            type="button"
+            onClick={onClick}
+            style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: 6,
+                padding: "6px 10px",
+                borderRadius: 999,
+                border: "1px solid rgba(0,0,0,0.14)",
+                background: active ? "#111827" : "#f9fafb",
+                color: active ? "#fff" : "#111827",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: "pointer"
+            }}
+        >
+            {icon}
+            {label}
+        </button>
     );
 
     const sizeBtn = (label: string, value: string, setValue: (v: string) => void) => {
@@ -358,18 +357,6 @@ export function KdsSyncButton({
         setStatus("sending");
         setErrorMsg(null);
         try {
-            const sizes: Record<string, number> = {};
-            const sizesMap: Record<string, number> = {
-                F: parseIntOrZero(sizeF),
-                M: parseIntOrZero(sizeM),
-                P: parseIntOrZero(sizeP),
-                I: parseIntOrZero(sizeI),
-                FT: parseIntOrZero(sizeFT)
-            };
-            Object.entries(sizesMap).forEach(([key, value]) => {
-                if (value > 0) sizes[key] = value;
-            });
-
             const payload: Record<string, unknown> = {
                 _action: "saveRow",
                 date: new Date().toISOString().slice(0, 10),
@@ -385,7 +372,7 @@ export function KdsSyncButton({
                 sizeFT: String(parseIntOrZero(sizeFT)),
                 channel: channel || "CARDAPIO",
                 deliveryZoneId: hasMoto ? deliveryZoneId || "" : "",
-                isCreditCard: isCreditCard ? "on" : "",
+                isCreditCard: paymentMethod === "credit" ? "on" : "",
                 customerName: customerNameState || "",
                 customerPhone: customerPhoneState || ""
             };
@@ -441,7 +428,7 @@ export function KdsSyncButton({
                             }}
                         >
                         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 8 }}>
-                            <div style={{ fontWeight: 700, fontSize: 14 }}>Pedido no KDS</div>
+                            <div style={{ fontWeight: 700, fontSize: 16 }}>Pedido no KDS</div>
                             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                                 <button
                                     type="button"
@@ -477,13 +464,13 @@ export function KdsSyncButton({
                             </div>
                         </div>
 
-                        <div style={{ fontSize: 12, color: "#374151", marginBottom: 8 }}>
+                        <div style={{ fontSize: 13, color: "#374151", marginBottom: 10 }}>
                             Pedido: <strong>{commandValue || "N/A"}</strong>
                         </div>
 
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
                             <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-command">
+                                <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-command">
                                     Comanda
                                 </label>
                                 <input
@@ -497,7 +484,7 @@ export function KdsSyncButton({
                                 />
                             </div>
                             <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-order-amount">
+                                <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-order-amount">
                                     Valor pedido
                                 </label>
                                 <MoneyInputInline
@@ -509,9 +496,9 @@ export function KdsSyncButton({
                                 />
                             </div>
                         </div>
-                        <div style={{ marginBottom: 10 }}>
+                        <div style={{ marginBottom: 14 }}>
                             <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-channel">
+                                <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-channel">
                                     Canal
                                 </label>
                                 <select
@@ -529,7 +516,7 @@ export function KdsSyncButton({
                             </div>
                         </div>
 
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
                             {sizeBtn("F", sizeF, setSizeF)}
                             {sizeBtn("M", sizeM, setSizeM)}
                             {sizeBtn("P", sizeP, setSizeP)}
@@ -558,22 +545,28 @@ export function KdsSyncButton({
                             </button>
                         </div>
 
-                        <div style={{ display: "flex", alignItems: "center", gap: 16, marginBottom: 10 }}>
-                            {toggleSwitch(hasMoto, (next) => {
+                        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+                            {pillButton("Delivery", hasMoto, () => {
+                                const next = !hasMoto;
                                 setHasMoto(next);
                                 if (next) setTakeAway(false);
-                            }, "Delivery")}
-                            {toggleSwitch(takeAway, (next) => {
+                            }, <Bike size={14} />)}
+                            {pillButton("Retirada", takeAway, () => {
+                                const next = !takeAway;
                                 setTakeAway(next);
                                 if (next) setHasMoto(false);
-                            }, "Retirada")}
-                            {toggleSwitch(isCreditCard, (next) => setIsCreditCard(next), "Cartão")}
+                            }, <Package size={14} />)}
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                            {pillButton("Crédito", paymentMethod === "credit", () => setPaymentMethod("credit"), <CreditCard size={14} />)}
+                            {pillButton("Débito", paymentMethod === "debit", () => setPaymentMethod("debit"), <Wallet size={14} />)}
+                            {pillButton("Dinheiro", paymentMethod === "cash", () => setPaymentMethod("cash"), <Banknote size={14} />)}
                         </div>
 
                         {hasMoto && (
-                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 8, marginBottom: 10 }}>
+                            <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 12 }}>
                                 <div style={fieldStyle}>
-                                    <label style={labelStyle} htmlFor="kds-zone">
+                                    <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-zone">
                                         Zona de entrega
                                     </label>
                                     <select
@@ -593,7 +586,7 @@ export function KdsSyncButton({
                                     {zonesError && <div style={{ color: "#b91c1c", fontSize: 11 }}>{zonesError}</div>}
                                 </div>
                                 <div style={fieldStyle}>
-                                    <label style={labelStyle} htmlFor="kds-moto-value">
+                                    <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-moto-value">
                                         Valor moto
                                     </label>
                                     <MoneyInputInline
@@ -606,9 +599,11 @@ export function KdsSyncButton({
                             </div>
                         )}
 
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 10 }}>
+                        <div style={{ height: 1, background: "rgba(0,0,0,0.08)", margin: "4px 0 12px" }} />
+
+                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
                             <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-customer-name">
+                                <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-customer-name">
                                     Cliente (opcional)
                                 </label>
                                 <input
@@ -620,7 +615,7 @@ export function KdsSyncButton({
                                 />
                             </div>
                             <div style={fieldStyle}>
-                                <label style={labelStyle} htmlFor="kds-customer-phone">
+                                <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-customer-phone">
                                     Telefone (opcional)
                                 </label>
                                 <input
@@ -637,13 +632,13 @@ export function KdsSyncButton({
                             type="button"
                             style={{
                                 width: "100%",
-                                padding: "10px 12px",
+                                padding: "12px 14px",
                                 borderRadius: 8,
                                 borderWidth: 0,
-                                background: "#10b981",
+                                background: "#42b883",
                                 color: "#fff",
                                 cursor: "pointer",
-                                fontSize: 13,
+                                fontSize: 14,
                                 fontWeight: 600
                             }}
                             onClick={handleSync}
