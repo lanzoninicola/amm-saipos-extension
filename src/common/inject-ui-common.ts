@@ -40,8 +40,9 @@ export const labelStyle: React.CSSProperties = {
 
 export const inputStyle: React.CSSProperties = {
     width: "100%",
-    borderRadius: 6,
-    border: "1px solid rgba(0,0,0,0.14)",
-    padding: "8px 10px",
-    fontSize: 12
+    boxSizing: "border-box",
+    borderRadius: 10,
+    border: "1px solid rgba(17,24,39,0.22)",
+    padding: "11px 12px",
+    fontSize: 14
 };

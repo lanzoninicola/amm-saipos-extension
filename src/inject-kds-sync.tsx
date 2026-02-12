@@ -70,17 +70,6 @@ type DeliveryZone = { id: string | number; name?: string; title?: string };
 
 const CHANNEL_OPTIONS = ["WHATS/PRESENCIAL/TELE", "CARDAPIO", "AIQFOME", "IFOOD"];
 
-function toCents(value?: number | string | null) {
-    const n =
-        value == null
-            ? 0
-            : typeof value === "number"
-            ? value
-            : Number((value as any)?.toString?.() ?? `${value}`);
-    const finite = Number.isFinite(n) ? n : 0;
-    return Math.max(0, Math.round(finite * 100));
-}
-
 function parseIntOrZero(value: string): number {
     const parsed = parseInt(value || "0", 10);
     return Number.isFinite(parsed) ? parsed : 0;
@@ -97,11 +86,13 @@ export function KdsSyncButton({
     commandNumber,
     customerName,
     customerPhone,
+    initialOrderAmountCents,
     openOnMount
 }: {
     commandNumber?: string;
     customerName?: string;
     customerPhone?: string;
+    initialOrderAmountCents?: number;
     openOnMount?: boolean;
 }) {
     const [modalOpen, setModalOpen] = useState(false);
@@ -116,9 +107,9 @@ export function KdsSyncButton({
     const [zonesError, setZonesError] = useState<string | null>(null);
 
     const [commandValue, setCommandValue] = useState(commandNumber || "");
-    const [orderAmountCents, setOrderAmountCents] = useState(0);
+    const [orderAmountCents, setOrderAmountCents] = useState(() => Math.max(0, initialOrderAmountCents || 0));
     const [motoValueCents, setMotoValueCents] = useState(0);
-    const orderAmountRef = useRef<HTMLInputElement | null>(null);
+    const orderAmountRef = useRef<HTMLInputElement>(null);
     const [hasMoto, setHasMoto] = useState(false);
     const [takeAway, setTakeAway] = useState(false);
     const [sizeF, setSizeF] = useState("0");
@@ -129,6 +120,7 @@ export function KdsSyncButton({
     const [channel, setChannel] = useState("CARDAPIO");
     const [deliveryZoneId, setDeliveryZoneId] = useState("");
     const [paymentMethod, setPaymentMethod] = useState<"credit" | "debit" | "cash">("credit");
+    const [hoveredSegment, setHoveredSegment] = useState<string | null>(null);
     const [customerNameState, setCustomerNameState] = useState(customerName || "");
     const [customerPhoneState, setCustomerPhoneState] = useState(customerPhone || "");
 
@@ -139,6 +131,7 @@ export function KdsSyncButton({
     useEffect(() => {
         if (!modalOpen) return;
         setCommandValue(commandNumber || "");
+        setOrderAmountCents(Math.max(0, initialOrderAmountCents || 0));
         setCustomerNameState(customerName || "");
         setCustomerPhoneState(customerPhone || "");
         setErrorMsg(null);
@@ -184,7 +177,7 @@ export function KdsSyncButton({
         };
 
         loadZones();
-    }, [modalOpen, commandNumber, customerName, customerPhone, endpoint, apiKey, zonesEndpoint]);
+    }, [modalOpen, commandNumber, initialOrderAmountCents, customerName, customerPhone, endpoint, apiKey, zonesEndpoint]);
 
     const btnStyle: React.CSSProperties = {
         display: "inline-flex",
@@ -230,7 +223,7 @@ export function KdsSyncButton({
         onChangeCents: (next: number) => void;
         placeholder?: string;
         disabled?: boolean;
-        inputRef?: React.RefObject<HTMLInputElement | null>;
+        inputRef?: React.RefObject<HTMLInputElement>;
         keepFocus?: boolean;
     }) => {
         const display = (valueCents / 100).toLocaleString("pt-BR", {
@@ -292,63 +285,49 @@ export function KdsSyncButton({
         );
     };
 
-    const pillButton = (
-        label: string,
+    const segmentedButtonStyle = (
         active: boolean,
-        onClick: () => void,
-        icon?: React.ReactNode
-    ) => (
-        <button
-            type="button"
-            onClick={onClick}
-            style={{
-                display: "inline-flex",
-                alignItems: "center",
-                gap: 6,
-                padding: "6px 10px",
-                borderRadius: 999,
-                border: "1px solid rgba(0,0,0,0.14)",
-                background: active ? "#111827" : "#f9fafb",
-                color: active ? "#fff" : "#111827",
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: "pointer"
-            }}
-        >
-            {icon}
-            {label}
-        </button>
-    );
+        hovered: boolean,
+        withRightDivider: boolean
+    ): React.CSSProperties => ({
+        minHeight: 44,
+        border: "none",
+        borderRight: withRightDivider ? "1px solid rgba(17,24,39,0.24)" : "none",
+        background: active ? "#111827" : hovered ? "#f3f4f6" : "transparent",
+        color: active ? "#fff" : "#111827",
+        fontSize: 16,
+        fontWeight: 700,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        gap: 7,
+        cursor: "pointer",
+        transition: "background-color 150ms ease, color 150ms ease"
+    });
 
-    const sizeBtn = (label: string, value: string, setValue: (v: string) => void) => {
+    const sizeSegmentButton = (
+        label: string,
+        value: string,
+        setValue: (v: string) => void,
+        withRightDivider: boolean
+    ) => {
         const numeric = parseIntOrZero(value);
+        const hoverKey = `size-${label}`;
         return (
             <button
                 type="button"
-                style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 999,
-                    border: "1px solid rgba(0,0,0,0.18)",
-                    background: numeric > 0 ? "#1e40af" : "#fff",
-                    color: numeric > 0 ? "#fff" : "#111827",
-                    fontWeight: 700,
-                    fontSize: 12,
-                    cursor: "pointer",
-                    display: "flex",
-                    alignItems: "center",
-                    justifyContent: "center",
-                    gap: 4
-                }}
                 onClick={() => setValue(String(numeric + 1))}
                 onContextMenu={(e) => {
                     e.preventDefault();
                     setValue(String(Math.max(0, numeric - 1)));
                 }}
+                onMouseEnter={() => setHoveredSegment(hoverKey)}
+                onMouseLeave={() => setHoveredSegment(null)}
+                style={segmentedButtonStyle(numeric > 0, hoveredSegment === hoverKey, withRightDivider)}
                 title="Clique para +1, botão direito para -1"
             >
                 {label}
-                {numeric > 0 && <span style={{ fontSize: 11 }}>{numeric}</span>}
+                {numeric > 0 && <span style={{ fontSize: 11, fontWeight: 600 }}>({numeric})</span>}
             </button>
         );
     };
@@ -421,8 +400,8 @@ export function KdsSyncButton({
                                 background: "#fff",
                                 borderRadius: 10,
                                 boxShadow: "0 12px 32px rgba(0,0,0,0.2)",
-                                minWidth: 300,
-                                padding: 12,
+                                width: "min(520px, calc(100vw - 24px))",
+                                padding: 14,
                                 zIndex: 2147483647,
                                 pointerEvents: "auto"
                             }}
@@ -468,8 +447,8 @@ export function KdsSyncButton({
                             Pedido: <strong>{commandValue || "N/A"}</strong>
                         </div>
 
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 14 }}>
-                            <div style={fieldStyle}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14, marginBottom: 16 }}>
+                            <div style={{ ...fieldStyle, minWidth: 0 }}>
                                 <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-command">
                                     Comanda
                                 </label>
@@ -483,7 +462,7 @@ export function KdsSyncButton({
                                     placeholder="Número"
                                 />
                             </div>
-                            <div style={fieldStyle}>
+                            <div style={{ ...fieldStyle, minWidth: 0 }}>
                                 <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-order-amount">
                                     Valor pedido
                                 </label>
@@ -503,7 +482,7 @@ export function KdsSyncButton({
                                 </label>
                                 <select
                                     id="kds-channel"
-                                    style={{ ...inputStyle, height: 34 }}
+                                    style={{ ...inputStyle, height: 42 }}
                                     value={channel}
                                     onChange={(e) => setChannel(e.target.value)}
                                 >
@@ -516,23 +495,23 @@ export function KdsSyncButton({
                             </div>
                         </div>
 
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                            {sizeBtn("F", sizeF, setSizeF)}
-                            {sizeBtn("M", sizeM, setSizeM)}
-                            {sizeBtn("P", sizeP, setSizeP)}
-                            {sizeBtn("I", sizeI, setSizeI)}
-                            {sizeBtn("FT", sizeFT, setSizeFT)}
+                        <div
+                            style={{
+                                display: "grid",
+                                gridTemplateColumns: "repeat(6, minmax(0, 1fr))",
+                                border: "1px solid rgba(17,24,39,0.34)",
+                                borderRadius: 16,
+                                overflow: "hidden",
+                                marginBottom: 12
+                            }}
+                        >
+                            {sizeSegmentButton("F", sizeF, setSizeF, true)}
+                            {sizeSegmentButton("M", sizeM, setSizeM, true)}
+                            {sizeSegmentButton("P", sizeP, setSizeP, true)}
+                            {sizeSegmentButton("I", sizeI, setSizeI, true)}
+                            {sizeSegmentButton("FT", sizeFT, setSizeFT, true)}
                             <button
                                 type="button"
-                                style={{
-                                    height: 32,
-                                    padding: "0 10px",
-                                    borderRadius: 999,
-                                    border: "1px solid rgba(0,0,0,0.12)",
-                                    background: "#f3f4f6",
-                                    fontSize: 12,
-                                    cursor: "pointer"
-                                }}
                                 onClick={() => {
                                     setSizeF("0");
                                     setSizeM("0");
@@ -540,27 +519,95 @@ export function KdsSyncButton({
                                     setSizeI("0");
                                     setSizeFT("0");
                                 }}
+                                onMouseEnter={() => setHoveredSegment("size-reset")}
+                                onMouseLeave={() => setHoveredSegment(null)}
+                                style={segmentedButtonStyle(false, hoveredSegment === "size-reset", false)}
                             >
                                 Zerar
                             </button>
                         </div>
 
-                        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
-                            {pillButton("Delivery", hasMoto, () => {
-                                const next = !hasMoto;
-                                setHasMoto(next);
-                                if (next) setTakeAway(false);
-                            }, <Bike size={14} />)}
-                            {pillButton("Retirada", takeAway, () => {
-                                const next = !takeAway;
-                                setTakeAway(next);
-                                if (next) setHasMoto(false);
-                            }, <Package size={14} />)}
+                        <div
+                            style={{
+                                display: "grid",
+                                gridTemplateColumns: "repeat(2, minmax(0, 1fr))",
+                                border: "1px solid rgba(17,24,39,0.34)",
+                                borderRadius: 16,
+                                overflow: "hidden",
+                                marginBottom: 10
+                            }}
+                        >
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const next = !hasMoto;
+                                    setHasMoto(next);
+                                    if (next) setTakeAway(false);
+                                }}
+                                onMouseEnter={() => setHoveredSegment("delivery")}
+                                onMouseLeave={() => setHoveredSegment(null)}
+                                style={segmentedButtonStyle(hasMoto, hoveredSegment === "delivery", true)}
+                            >
+                                <Bike size={16} />
+                                Delivery
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    const next = !takeAway;
+                                    setTakeAway(next);
+                                    if (next) setHasMoto(false);
+                                }}
+                                onMouseEnter={() => setHoveredSegment("takeaway")}
+                                onMouseLeave={() => setHoveredSegment(null)}
+                                style={segmentedButtonStyle(takeAway, hoveredSegment === "takeaway", false)}
+                            >
+                                <Package size={16} />
+                                Retirada
+                            </button>
                         </div>
-                        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
-                            {pillButton("Crédito", paymentMethod === "credit", () => setPaymentMethod("credit"), <CreditCard size={14} />)}
-                            {pillButton("Débito", paymentMethod === "debit", () => setPaymentMethod("debit"), <Wallet size={14} />)}
-                            {pillButton("Dinheiro", paymentMethod === "cash", () => setPaymentMethod("cash"), <Banknote size={14} />)}
+                        <div style={{ height: 1, background: "rgba(0,0,0,0.14)", margin: "0 0 10px" }} />
+                        <div
+                            style={{
+                                display: "grid",
+                                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                                border: "1px solid rgba(17,24,39,0.34)",
+                                borderRadius: 16,
+                                overflow: "hidden",
+                                marginBottom: 12
+                            }}
+                        >
+                            <button
+                                type="button"
+                                onClick={() => setPaymentMethod("credit")}
+                                onMouseEnter={() => setHoveredSegment("credit")}
+                                onMouseLeave={() => setHoveredSegment(null)}
+                                style={segmentedButtonStyle(paymentMethod === "credit", hoveredSegment === "credit", true)}
+                            >
+                                <CreditCard size={16} />
+                                Crédito
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPaymentMethod("debit")}
+                                onMouseEnter={() => setHoveredSegment("debit")}
+                                onMouseLeave={() => setHoveredSegment(null)}
+                                style={segmentedButtonStyle(paymentMethod === "debit", hoveredSegment === "debit", true)}
+                                title="À vista (Pix/cartão de débito)"
+                            >
+                                <Wallet size={16} />
+                                À vista
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPaymentMethod("cash")}
+                                onMouseEnter={() => setHoveredSegment("cash")}
+                                onMouseLeave={() => setHoveredSegment(null)}
+                                style={segmentedButtonStyle(paymentMethod === "cash", hoveredSegment === "cash", false)}
+                            >
+                                <Banknote size={16} />
+                                Dinheiro
+                            </button>
                         </div>
 
                         {hasMoto && (
@@ -571,7 +618,7 @@ export function KdsSyncButton({
                                     </label>
                                     <select
                                         id="kds-zone"
-                                        style={{ ...inputStyle, height: 34 }}
+                                        style={{ ...inputStyle, height: 42 }}
                                         value={deliveryZoneId}
                                         onChange={(e) => setDeliveryZoneId(e.target.value)}
                                         disabled={zonesLoading}
@@ -601,8 +648,8 @@ export function KdsSyncButton({
 
                         <div style={{ height: 1, background: "rgba(0,0,0,0.08)", margin: "4px 0 12px" }} />
 
-                        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginBottom: 12 }}>
-                            <div style={fieldStyle}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 14, marginBottom: 14 }}>
+                            <div style={{ ...fieldStyle, minWidth: 0 }}>
                                 <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-customer-name">
                                     Cliente (opcional)
                                 </label>
@@ -614,7 +661,7 @@ export function KdsSyncButton({
                                     onChange={(e) => setCustomerNameState(e.target.value)}
                                 />
                             </div>
-                            <div style={fieldStyle}>
+                            <div style={{ ...fieldStyle, minWidth: 0 }}>
                                 <label style={{ ...labelStyle, fontSize: 12 }} htmlFor="kds-customer-phone">
                                     Telefone (opcional)
                                 </label>
@@ -732,6 +779,34 @@ function extractCustomerNameFromCard(anchorEl: HTMLElement | null): string {
     return "";
 }
 
+function parseCurrencyToCents(text: string): number {
+    const found =
+        text.match(/R\$\s*([\d\.\,]+)/i)?.[1] ||
+        text.match(/([\d]{1,3}(?:\.\d{3})*(?:,\d{2})|\d+(?:,\d{2})?)/)?.[1] ||
+        "";
+    if (!found) return 0;
+    const normalized = found.replace(/\./g, "").replace(",", ".");
+    const value = Number(normalized);
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.round(value * 100));
+}
+
+function extractOrderAmountCentsFromCard(anchorEl: HTMLElement | null): number {
+    if (!anchorEl) return 0;
+    let cursor: HTMLElement | null = anchorEl;
+    while (cursor && cursor !== document.body) {
+        const paymentLikeBlocks = cursor.querySelectorAll<HTMLElement>(".pull-left.ng-binding");
+        for (const block of paymentLikeBlocks) {
+            const text = block.textContent?.replace(/\s+/g, " ").trim() || "";
+            if (!text.includes("R$")) continue;
+            const cents = parseCurrencyToCents(text);
+            if (cents > 0) return cents;
+        }
+        cursor = cursor.parentElement;
+    }
+    return 0;
+}
+
 function mountKdsOnCard(phoneEl: HTMLSpanElement) {
     const wrapper = phoneEl.closest<HTMLElement>(`.${WRAPPER_CLASS}`);
     if (!wrapper) return;
@@ -748,10 +823,16 @@ function mountKdsOnCard(phoneEl: HTMLSpanElement) {
     }
 
     const commandNumber = extractCommandNumberFromCard(phoneEl);
+    const initialOrderAmountCents = extractOrderAmountCentsFromCard(phoneEl);
     const customerName = extractCustomerNameFromCard(phoneEl);
     const customerPhone = phoneEl.textContent?.trim() || "";
     ReactDOM.createRoot(kdsMount).render(
-        <KdsSyncButton commandNumber={commandNumber} customerName={customerName} customerPhone={customerPhone} />
+        <KdsSyncButton
+            commandNumber={commandNumber}
+            customerName={customerName}
+            customerPhone={customerPhone}
+            initialOrderAmountCents={initialOrderAmountCents}
+        />
     );
     wrapper.setAttribute(KDS_MARK_ATTR, "1");
 }
@@ -786,6 +867,7 @@ export function initKdsSync() {
                 <KdsSyncButton
                     openOnMount
                     commandNumber="1"
+                    initialOrderAmountCents={9990}
                     customerName="Cliente Teste"
                     customerPhone="(41) 99999-0000"
                 />
