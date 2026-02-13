@@ -290,20 +290,36 @@ export function KdsSyncButton({
         hovered: boolean,
         withRightDivider: boolean
     ): React.CSSProperties => ({
-        minHeight: 44,
+        minHeight: 40,
         border: "none",
         borderRight: withRightDivider ? "1px solid rgba(17,24,39,0.24)" : "none",
         background: active ? "#111827" : hovered ? "#f3f4f6" : "transparent",
         color: active ? "#fff" : "#111827",
-        fontSize: 16,
+        fontSize: 14,
         fontWeight: 700,
         display: "flex",
         alignItems: "center",
         justifyContent: "center",
-        gap: 7,
+        gap: 6,
         cursor: "pointer",
         transition: "background-color 150ms ease, color 150ms ease"
     });
+    const modernSelectStyle: React.CSSProperties = {
+        ...inputStyle,
+        height: 48,
+        paddingRight: 36,
+        border: "1px solid rgba(17,24,39,0.2)",
+        backgroundColor: "#f8fafc",
+        boxShadow: "inset 0 1px 1px rgba(17,24,39,0.04)",
+        appearance: "none",
+        WebkitAppearance: "none",
+        MozAppearance: "none",
+        backgroundImage:
+            "linear-gradient(45deg, transparent 50%, #6b7280 50%), linear-gradient(135deg, #6b7280 50%, transparent 50%)",
+        backgroundPosition: "calc(100% - 18px) calc(50% - 3px), calc(100% - 13px) calc(50% - 3px)",
+        backgroundSize: "5px 5px, 5px 5px",
+        backgroundRepeat: "no-repeat"
+    };
 
     const sizeSegmentButton = (
         label: string,
@@ -402,6 +418,8 @@ export function KdsSyncButton({
                                 boxShadow: "0 12px 32px rgba(0,0,0,0.2)",
                                 width: "min(520px, calc(100vw - 24px))",
                                 padding: 14,
+                                fontFamily: '"Inter", "Segoe UI", Arial, sans-serif',
+                                fontSize: 14,
                                 zIndex: 2147483647,
                                 pointerEvents: "auto"
                             }}
@@ -482,7 +500,7 @@ export function KdsSyncButton({
                                 </label>
                                 <select
                                     id="kds-channel"
-                                    style={{ ...inputStyle, height: 42 }}
+                                    style={modernSelectStyle}
                                     value={channel}
                                     onChange={(e) => setChannel(e.target.value)}
                                 >
@@ -548,7 +566,7 @@ export function KdsSyncButton({
                                 onMouseLeave={() => setHoveredSegment(null)}
                                 style={segmentedButtonStyle(hasMoto, hoveredSegment === "delivery", true)}
                             >
-                                <Bike size={16} />
+                                <Bike size={14} />
                                 Delivery
                             </button>
                             <button
@@ -562,54 +580,10 @@ export function KdsSyncButton({
                                 onMouseLeave={() => setHoveredSegment(null)}
                                 style={segmentedButtonStyle(takeAway, hoveredSegment === "takeaway", false)}
                             >
-                                <Package size={16} />
+                                <Package size={14} />
                                 Retirada
                             </button>
                         </div>
-                        <div style={{ height: 1, background: "rgba(0,0,0,0.14)", margin: "0 0 10px" }} />
-                        <div
-                            style={{
-                                display: "grid",
-                                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
-                                border: "1px solid rgba(17,24,39,0.34)",
-                                borderRadius: 16,
-                                overflow: "hidden",
-                                marginBottom: 12
-                            }}
-                        >
-                            <button
-                                type="button"
-                                onClick={() => setPaymentMethod("credit")}
-                                onMouseEnter={() => setHoveredSegment("credit")}
-                                onMouseLeave={() => setHoveredSegment(null)}
-                                style={segmentedButtonStyle(paymentMethod === "credit", hoveredSegment === "credit", true)}
-                            >
-                                <CreditCard size={16} />
-                                Crédito
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setPaymentMethod("debit")}
-                                onMouseEnter={() => setHoveredSegment("debit")}
-                                onMouseLeave={() => setHoveredSegment(null)}
-                                style={segmentedButtonStyle(paymentMethod === "debit", hoveredSegment === "debit", true)}
-                                title="À vista (Pix/cartão de débito)"
-                            >
-                                <Wallet size={16} />
-                                À vista
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setPaymentMethod("cash")}
-                                onMouseEnter={() => setHoveredSegment("cash")}
-                                onMouseLeave={() => setHoveredSegment(null)}
-                                style={segmentedButtonStyle(paymentMethod === "cash", hoveredSegment === "cash", false)}
-                            >
-                                <Banknote size={16} />
-                                Dinheiro
-                            </button>
-                        </div>
-
                         {hasMoto && (
                             <div style={{ display: "grid", gridTemplateColumns: "2fr 1fr", gap: 12, marginBottom: 12 }}>
                                 <div style={fieldStyle}>
@@ -618,7 +592,7 @@ export function KdsSyncButton({
                                     </label>
                                     <select
                                         id="kds-zone"
-                                        style={{ ...inputStyle, height: 42 }}
+                                        style={modernSelectStyle}
                                         value={deliveryZoneId}
                                         onChange={(e) => setDeliveryZoneId(e.target.value)}
                                         disabled={zonesLoading}
@@ -645,6 +619,49 @@ export function KdsSyncButton({
                                 </div>
                             </div>
                         )}
+                        <div style={{ height: 1, background: "rgba(0,0,0,0.14)", margin: "0 0 10px" }} />
+                        <div
+                            style={{
+                                display: "grid",
+                                gridTemplateColumns: "repeat(3, minmax(0, 1fr))",
+                                border: "1px solid rgba(17,24,39,0.34)",
+                                borderRadius: 16,
+                                overflow: "hidden",
+                                marginBottom: 12
+                            }}
+                        >
+                            <button
+                                type="button"
+                                onClick={() => setPaymentMethod("credit")}
+                                onMouseEnter={() => setHoveredSegment("credit")}
+                                onMouseLeave={() => setHoveredSegment(null)}
+                                style={segmentedButtonStyle(paymentMethod === "credit", hoveredSegment === "credit", true)}
+                            >
+                                <CreditCard size={14} />
+                                Crédito
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPaymentMethod("debit")}
+                                onMouseEnter={() => setHoveredSegment("debit")}
+                                onMouseLeave={() => setHoveredSegment(null)}
+                                style={segmentedButtonStyle(paymentMethod === "debit", hoveredSegment === "debit", true)}
+                                title="À vista (Pix/cartão de débito)"
+                            >
+                                <Wallet size={14} />
+                                À vista
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setPaymentMethod("cash")}
+                                onMouseEnter={() => setHoveredSegment("cash")}
+                                onMouseLeave={() => setHoveredSegment(null)}
+                                style={segmentedButtonStyle(paymentMethod === "cash", hoveredSegment === "cash", false)}
+                            >
+                                <Banknote size={14} />
+                                Dinheiro
+                            </button>
+                        </div>
 
                         <div style={{ height: 1, background: "rgba(0,0,0,0.08)", margin: "4px 0 12px" }} />
 

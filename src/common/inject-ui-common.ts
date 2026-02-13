@@ -34,15 +34,15 @@ export const fieldStyle: React.CSSProperties = {
 };
 
 export const labelStyle: React.CSSProperties = {
-    fontSize: 11,
+    fontSize: 13,
     color: "#374151"
 };
 
 export const inputStyle: React.CSSProperties = {
     width: "100%",
     boxSizing: "border-box",
-    borderRadius: 10,
+    borderRadius: 12,
     border: "1px solid rgba(17,24,39,0.22)",
-    padding: "11px 12px",
-    fontSize: 14
+    padding: "13px 14px",
+    fontSize: 15
 };
