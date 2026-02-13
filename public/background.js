@@ -36,14 +36,6 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     return true;
   }
 
-  if (request.type === "FETCH_ORDER") {
-    fetch("https://jsonplaceholder.typicode.com/todos/1")
-      .then(res => res.json())
-      .then(data => sendResponse({ data }))
-      .catch(error => sendResponse({ error: error.message }));
-
-    return true;
-  }
 
   if (request.type === "KDS_ORDER") {
     const { endpoint, apiKey, payload } = request;
