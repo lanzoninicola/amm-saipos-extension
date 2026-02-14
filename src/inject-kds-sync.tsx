@@ -12,6 +12,11 @@ const PHONE_SELECTOR = 'span[data-qa="sale-customer-phone"]';
 const NAME_SELECTOR = 'span[data-qa="sale-name"]';
 const WRAPPER_CLASS = "amodomio-wapp-wrapper";
 const KDS_MARK_ATTR = "data-amodomio-kds";
+const DETAIL_SAVE_BUTTON_SELECTOR = 'button[ng-click="vm.save();"]';
+const DETAIL_MODAL_SELECTOR = ".modal-content";
+const DETAIL_SYNC_MARK_ATTR = "data-amodomio-kds-detail-sync";
+
+const commandContactByCard = new Map<string, { customerName: string; customerPhone: string }>();
 
 const KDS_STORAGE_KEYS = {
     endpoint: "amodomio-kds-endpoint",
@@ -42,7 +47,7 @@ async function sendKdsOrder(payload: Record<string, unknown>, config?: { endpoin
     const runtime = typeof chrome !== "undefined" && chrome?.runtime ? chrome.runtime : null;
     if (!runtime) throw new Error("chrome.runtime indisponível");
 
-    return new Promise<{ ok: boolean }>((resolve, reject) => {
+    return new Promise<{ ok: boolean; data?: unknown }>((resolve, reject) => {
         runtime.sendMessage(
             {
                 type: "KDS_ORDER",
@@ -50,7 +55,7 @@ async function sendKdsOrder(payload: Record<string, unknown>, config?: { endpoin
                 apiKey,
                 payload
             },
-            (response: { error?: string }) => {
+            (response: { error?: string; data?: unknown }) => {
                 const lastErr = runtime?.lastError;
                 if (lastErr) {
                     reject(new Error(lastErr.message));
@@ -60,7 +65,7 @@ async function sendKdsOrder(payload: Record<string, unknown>, config?: { endpoin
                     reject(new Error(response.error));
                     return;
                 }
-                resolve({ ok: true });
+                resolve({ ok: true, data: response?.data });
             }
         );
     });
@@ -82,18 +87,141 @@ function deriveZonesEndpoint(endpoint: string): string {
     return `${endpoint.replace(/\/$/, "")}/delivery-zones`;
 }
 
+function parseNumberText(value?: string | null): number {
+    if (!value) return 0;
+    const clean = value.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
+    const n = Number(clean);
+    return Number.isFinite(n) ? n : 0;
+}
+
+function parseCommandFromDetailModal(modalEl: Element): string {
+    const title = modalEl.querySelector("h4.modal-title")?.textContent?.trim() || "";
+    return extractFirstNumber(title);
+}
+
+function inferExistsFromResponse(data: unknown): boolean {
+    if (typeof data === "boolean") return data;
+    if (!data || typeof data !== "object") return false;
+    const payload = data as Record<string, unknown>;
+    const existsValue = payload.exists ?? payload.found ?? payload.synced ?? payload.alreadyExists ?? payload.ok;
+    if (typeof existsValue === "boolean") return existsValue;
+    if (typeof existsValue === "number") return existsValue > 0;
+    if (typeof existsValue === "string") return ["true", "1", "yes", "ok"].includes(existsValue.toLowerCase());
+    return false;
+}
+
+function inferSizeBucket(itemName: string): "sizeF" | "sizeM" | "sizeP" | "sizeI" | "sizeFT" | null {
+    const normalized = itemName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+    if (!normalized.includes("pizza")) return null;
+    if (normalized.includes("familia")) return "sizeF";
+    if (normalized.includes("media")) return "sizeM";
+    if (normalized.includes("pequena")) return "sizeP";
+    if (normalized.includes("individual")) return "sizeI";
+    if (normalized.includes("fatia") || normalized.includes("taglio")) return "sizeFT";
+    return null;
+}
+
+type DetailExtractedItem = {
+    qty: number;
+    itemName: string;
+    itemValue: number;
+    flavors: string[];
+};
+
+type KdsDetailDraft = {
+    commandNumber: string;
+    customerName: string;
+    customerPhone: string;
+    orderAmountCents: number;
+    sizeF: string;
+    sizeM: string;
+    sizeP: string;
+    sizeI: string;
+    sizeFT: string;
+    items: DetailExtractedItem[];
+};
+
+function extractItemsFromDetailModal(modalEl: Element): DetailExtractedItem[] {
+    const rows = Array.from(modalEl.querySelectorAll<HTMLElement>('[data-qa^="sale-item-selected-"]'));
+    return rows
+        .map((row) => {
+            const qtyText =
+                row.querySelector<HTMLElement>('[data-qa="item-quantity"]')?.textContent?.trim() ||
+                row.querySelector<HTMLElement>('[data-qa="item-decimal-quantity"]')?.textContent?.trim() ||
+                "1";
+            const qty = Math.max(1, parseNumberText(qtyText));
+
+            const editEl = row.querySelector<HTMLElement>('[data-qa="edit-item"]');
+            if (!editEl) return null;
+            const clone = editEl.cloneNode(true) as HTMLElement;
+            clone.querySelectorAll("small").forEach((small) => small.remove());
+            const itemName = clone.textContent?.replace(/\s+/g, " ").trim() || "";
+
+            const flavors = Array.from(editEl.querySelectorAll("small"))
+                .map((small) => small.textContent?.replace(/\+/g, "").replace(/\s+/g, " ").trim() || "")
+                .filter(Boolean);
+
+            const valueText = row.querySelector<HTMLElement>('[data-qa="item-value"]')?.textContent?.trim() || "0";
+            const itemValue = parseNumberText(valueText);
+
+            if (!itemName) return null;
+            return { qty, itemName, itemValue, flavors };
+        })
+        .filter((item): item is DetailExtractedItem => item !== null);
+}
+
+function buildDetailDraft(modalEl: Element): KdsDetailDraft {
+    const commandNumber = parseCommandFromDetailModal(modalEl);
+    if (!commandNumber) throw new Error("Não foi possível identificar o número do pedido.");
+
+    const savedContact = commandContactByCard.get(commandNumber);
+    const customerName =
+        (modalEl.querySelector('[data-qa="sale-name"]')?.textContent || savedContact?.customerName || "").trim();
+    const customerPhone =
+        (modalEl.querySelector('[data-qa="sale-customer-phone"]')?.textContent || savedContact?.customerPhone || "").trim();
+
+    const items = extractItemsFromDetailModal(modalEl);
+    const sizes = { sizeF: 0, sizeM: 0, sizeP: 0, sizeI: 0, sizeFT: 0 };
+    for (const item of items) {
+        const bucket = inferSizeBucket(item.itemName);
+        if (bucket) sizes[bucket] += item.qty;
+    }
+
+    const orderAmountText = modalEl.querySelector('[data-qa="delivery-sale-total-value"]')?.textContent?.trim() || "";
+    const orderAmount = parseNumberText(orderAmountText);
+
+    return {
+        commandNumber,
+        customerName,
+        customerPhone,
+        orderAmountCents: Math.max(0, Math.round(orderAmount * 100)),
+        sizeF: String(sizes.sizeF),
+        sizeM: String(sizes.sizeM),
+        sizeP: String(sizes.sizeP),
+        sizeI: String(sizes.sizeI),
+        sizeFT: String(sizes.sizeFT),
+        items
+    };
+}
+
 export function KdsSyncButton({
     commandNumber,
     customerName,
     customerPhone,
     initialOrderAmountCents,
-    openOnMount
+    openOnMount,
+    quickCardSyncOnly,
+    buttonLabel,
+    getDetailDraftOnOpen
 }: {
     commandNumber?: string;
     customerName?: string;
     customerPhone?: string;
     initialOrderAmountCents?: number;
     openOnMount?: boolean;
+    quickCardSyncOnly?: boolean;
+    buttonLabel?: string;
+    getDetailDraftOnOpen?: () => KdsDetailDraft;
 }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
@@ -123,6 +251,7 @@ export function KdsSyncButton({
     const [hoveredSegment, setHoveredSegment] = useState<string | null>(null);
     const [customerNameState, setCustomerNameState] = useState(customerName || "");
     const [customerPhoneState, setCustomerPhoneState] = useState(customerPhone || "");
+    const [capturedItems, setCapturedItems] = useState<DetailExtractedItem[]>([]);
 
     useEffect(() => {
         if (openOnMount) setModalOpen(true);
@@ -130,11 +259,24 @@ export function KdsSyncButton({
 
     useEffect(() => {
         if (!modalOpen) return;
-        setCommandValue(commandNumber || "");
-        setOrderAmountCents(Math.max(0, initialOrderAmountCents || 0));
-        setCustomerNameState(customerName || "");
-        setCustomerPhoneState(customerPhone || "");
-        setErrorMsg(null);
+        let detailDraft: KdsDetailDraft | null = null;
+        let captureError: string | null = null;
+        try {
+            detailDraft = getDetailDraftOnOpen ? getDetailDraftOnOpen() : null;
+        } catch (err) {
+            captureError = err instanceof Error ? err.message : "Falha ao capturar dados do detalhe";
+        }
+        setCommandValue(detailDraft?.commandNumber || commandNumber || "");
+        setOrderAmountCents(detailDraft?.orderAmountCents ?? Math.max(0, initialOrderAmountCents || 0));
+        setCustomerNameState(detailDraft?.customerName || customerName || "");
+        setCustomerPhoneState(detailDraft?.customerPhone || customerPhone || "");
+        setSizeF(detailDraft?.sizeF || "0");
+        setSizeM(detailDraft?.sizeM || "0");
+        setSizeP(detailDraft?.sizeP || "0");
+        setSizeI(detailDraft?.sizeI || "0");
+        setSizeFT(detailDraft?.sizeFT || "0");
+        setCapturedItems(detailDraft?.items || []);
+        setErrorMsg(captureError);
         setStatus("idle");
 
         const loadZones = async () => {
@@ -177,7 +319,7 @@ export function KdsSyncButton({
         };
 
         loadZones();
-    }, [modalOpen, commandNumber, initialOrderAmountCents, customerName, customerPhone, endpoint, apiKey, zonesEndpoint]);
+    }, [modalOpen, commandNumber, initialOrderAmountCents, customerName, customerPhone, endpoint, apiKey, zonesEndpoint, getDetailDraftOnOpen]);
 
     const btnStyle: React.CSSProperties = {
         display: "inline-flex",
@@ -186,7 +328,7 @@ export function KdsSyncButton({
         width: 28,
         height: 28,
         borderRadius: 6,
-        background: "#059669",
+        background: status === "ok" ? "#047857" : status === "error" ? "#b91c1c" : "#059669",
         color: "#fff",
         flex: "0 0 auto",
         cursor: "pointer",
@@ -371,6 +513,9 @@ export function KdsSyncButton({
                 customerName: customerNameState || "",
                 customerPhone: customerPhoneState || ""
             };
+            if (capturedItems.length) {
+                payload.items = capturedItems;
+            }
 
             await sendKdsOrder(payload, { endpoint, apiKey });
             setStatus("ok");
@@ -382,21 +527,93 @@ export function KdsSyncButton({
         }
     };
 
+    const handleCardPhoneSync = async () => {
+        if (!commandValue) {
+            setStatus("error");
+            setErrorMsg("Comanda não encontrada no card.");
+            setTimeout(() => setStatus("idle"), 1800);
+            return;
+        }
+        if (!customerPhoneState) {
+            setStatus("error");
+            setErrorMsg("Telefone não encontrado no card.");
+            setTimeout(() => setStatus("idle"), 1800);
+            return;
+        }
+
+        setStatus("sending");
+        setErrorMsg(null);
+        try {
+            const check = await sendKdsOrder({
+                _action: "existsRow",
+                commandNumber: commandValue
+            });
+
+            if (!inferExistsFromResponse(check.data)) {
+                setStatus("ok");
+                setErrorMsg("Pedido ainda não sincronizado. Use o botão no detalhe para enviar completo.");
+                setTimeout(() => {
+                    setStatus("idle");
+                    setErrorMsg(null);
+                }, 2200);
+                return;
+            }
+
+            await sendKdsOrder({
+                _action: "updatePhoneIfExists",
+                commandNumber: commandValue,
+                customerPhone: customerPhoneState,
+                customerName: customerNameState || ""
+            });
+
+            setStatus("ok");
+            setTimeout(() => setStatus("idle"), 1200);
+        } catch (err) {
+            setStatus("error");
+            setErrorMsg(err instanceof Error ? err.message : "Falha ao sincronizar telefone");
+            setTimeout(() => setStatus("idle"), 1800);
+        }
+    };
+
     return (
         <div style={{ position: "relative" }}>
             <button
                 type="button"
-                title={`Sincronizar pedido no KDS (${status})`}
-                style={btnStyle}
+                title={
+                    quickCardSyncOnly
+                        ? `Atualizar telefone no KDS (${status})`
+                        : `Sincronizar pedido no KDS (${status})`
+                }
+                style={
+                    buttonLabel
+                        ? {
+                              marginLeft: 8,
+                              padding: "6px 12px",
+                              borderRadius: 4,
+                              borderWidth: 0,
+                              background: status === "ok" ? "#047857" : status === "error" ? "#b91c1c" : "#10b981",
+                              color: "#fff",
+                              fontSize: 12,
+                              fontWeight: 600,
+                              cursor: "pointer",
+                              height: 34
+                          }
+                        : btnStyle
+                }
                 onClick={(e) => {
                     e.stopPropagation();
+                    if (quickCardSyncOnly) {
+                        void handleCardPhoneSync();
+                        return;
+                    }
                     setModalOpen(true);
                 }}
             >
-                <RefreshCw size={16} />
+                {buttonLabel ? buttonLabel : <RefreshCw size={16} />}
             </button>
 
-            {modalOpen &&
+            {!quickCardSyncOnly &&
+                modalOpen &&
                 createPortal(
                     <div
                         style={{
@@ -691,6 +908,23 @@ export function KdsSyncButton({
                                 />
                             </div>
                         </div>
+                        {capturedItems.length > 0 && (
+                            <div style={{ marginBottom: 10, border: "1px solid rgba(17,24,39,0.15)", borderRadius: 8, padding: 8 }}>
+                                <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Itens capturados do detalhe</div>
+                                <div style={{ maxHeight: 120, overflow: "auto", fontSize: 12, color: "#374151" }}>
+                                    {capturedItems.map((item, idx) => (
+                                        <div key={`${item.itemName}-${idx}`} style={{ marginBottom: 6 }}>
+                                            <div>
+                                                {item.qty}x {item.itemName} - R$ {item.itemValue.toFixed(2).replace(".", ",")}
+                                            </div>
+                                            {item.flavors.length > 0 && (
+                                                <div style={{ fontSize: 11, color: "#6b7280" }}>Sabores: {item.flavors.join(", ")}</div>
+                                            )}
+                                        </div>
+                                    ))}
+                                </div>
+                            </div>
+                        )}
 
                         <button
                             type="button"
@@ -824,6 +1058,24 @@ function extractOrderAmountCentsFromCard(anchorEl: HTMLElement | null): number {
     return 0;
 }
 
+function mountKdsOnDetailSaveButton(saveButton: HTMLButtonElement) {
+    const modal = saveButton.closest(DETAIL_MODAL_SELECTOR);
+    if (!modal) return;
+    if (modal.hasAttribute(DETAIL_SYNC_MARK_ATTR)) return;
+
+    const mount = document.createElement("span");
+    mount.className = "amodomio-kds-detail-mount";
+    saveButton.insertAdjacentElement("afterend", mount);
+
+    ReactDOM.createRoot(mount).render(
+        <KdsSyncButton
+            buttonLabel="Sync KDS"
+            getDetailDraftOnOpen={() => buildDetailDraft(modal)}
+        />
+    );
+    modal.setAttribute(DETAIL_SYNC_MARK_ATTR, "1");
+}
+
 function mountKdsOnCard(phoneEl: HTMLSpanElement) {
     const wrapper = phoneEl.closest<HTMLElement>(`.${WRAPPER_CLASS}`);
     if (!wrapper) return;
@@ -843,12 +1095,17 @@ function mountKdsOnCard(phoneEl: HTMLSpanElement) {
     const initialOrderAmountCents = extractOrderAmountCentsFromCard(phoneEl);
     const customerName = extractCustomerNameFromCard(phoneEl);
     const customerPhone = phoneEl.textContent?.trim() || "";
+    if (commandNumber) {
+        commandContactByCard.set(commandNumber, { customerName, customerPhone });
+    }
+
     ReactDOM.createRoot(kdsMount).render(
         <KdsSyncButton
             commandNumber={commandNumber}
             customerName={customerName}
             customerPhone={customerPhone}
             initialOrderAmountCents={initialOrderAmountCents}
+            quickCardSyncOnly
         />
     );
     wrapper.setAttribute(KDS_MARK_ATTR, "1");
@@ -856,6 +1113,7 @@ function mountKdsOnCard(phoneEl: HTMLSpanElement) {
 
 function scanAll() {
     document.querySelectorAll<HTMLSpanElement>(PHONE_SELECTOR).forEach((el) => mountKdsOnCard(el));
+    document.querySelectorAll<HTMLButtonElement>(DETAIL_SAVE_BUTTON_SELECTOR).forEach((btn) => mountKdsOnDetailSaveButton(btn));
 }
 
 export function initKdsSync() {
@@ -903,8 +1161,14 @@ export function initKdsSync() {
                 if (el.matches?.(PHONE_SELECTOR)) {
                     mountKdsOnCard(el as HTMLSpanElement);
                 }
+                if (el.matches?.(DETAIL_SAVE_BUTTON_SELECTOR)) {
+                    mountKdsOnDetailSaveButton(el as HTMLButtonElement);
+                }
                 el.querySelectorAll?.<HTMLSpanElement>(PHONE_SELECTOR).forEach((span) => {
                     mountKdsOnCard(span);
+                });
+                el.querySelectorAll?.<HTMLButtonElement>(DETAIL_SAVE_BUTTON_SELECTOR).forEach((btn) => {
+                    mountKdsOnDetailSaveButton(btn);
                 });
             });
         }
