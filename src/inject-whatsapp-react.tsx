@@ -27,6 +27,16 @@ const STORAGE_KEYS = {
     apiKey: "amodomio-zapi-api-key",
     operator: "amodomio-zapi-operator"
 };
+const KDS_STORAGE_KEYS = {
+    endpoint: "amodomio-kds-endpoint",
+    apiKey: "amodomio-kds-api-key",
+    zonesEndpoint: "amodomio-kds-zones-endpoint",
+    queueEndpoint: "amodomio-kds-queue-endpoint",
+    queuePollSeconds: "amodomio-kds-queue-poll-seconds",
+    queueDate: "amodomio-kds-queue-date"
+};
+const DEFAULT_KDS_QUEUE_READ_ENDPOINT = "https://amodomio.com.br/api/kds/orders";
+const ZAPI_SEND_MESSAGE_TYPE = "ZAPI_SEND_MESSAGE";
 const DEFAULT_ZAPI_ENDPOINT = "https://amodomio.com.br/api/messages/text";
 
 type FeedbackKind = "info" | "success" | "error";
@@ -63,6 +73,60 @@ function saveStoredConfig({ endpoint, apiKey, operator }: { endpoint: string; ap
     writeStorage(STORAGE_KEYS.operator, operator || "");
 }
 
+function getStoredKdsConfig() {
+    return {
+        endpoint: readStorage(KDS_STORAGE_KEYS.endpoint),
+        apiKey: readStorage(KDS_STORAGE_KEYS.apiKey),
+        zonesEndpoint: readStorage(KDS_STORAGE_KEYS.zonesEndpoint),
+        queueEndpoint: readStorage(KDS_STORAGE_KEYS.queueEndpoint),
+        queuePollSeconds: readStorage(KDS_STORAGE_KEYS.queuePollSeconds),
+        queueDate: readStorage(KDS_STORAGE_KEYS.queueDate)
+    };
+}
+
+function saveStoredKdsConfig({
+    endpoint,
+    apiKey,
+    zonesEndpoint,
+    queueEndpoint,
+    queuePollSeconds,
+    queueDate
+}: {
+    endpoint: string;
+    apiKey?: string;
+    zonesEndpoint?: string;
+    queueEndpoint?: string;
+    queuePollSeconds?: string;
+    queueDate?: string;
+}) {
+    writeStorage(KDS_STORAGE_KEYS.endpoint, endpoint);
+    writeStorage(KDS_STORAGE_KEYS.apiKey, apiKey || "");
+    writeStorage(KDS_STORAGE_KEYS.zonesEndpoint, zonesEndpoint || "");
+    writeStorage(KDS_STORAGE_KEYS.queueEndpoint, queueEndpoint || "");
+    writeStorage(KDS_STORAGE_KEYS.queuePollSeconds, queuePollSeconds || "");
+    writeStorage(KDS_STORAGE_KEYS.queueDate, queueDate || "");
+    window.dispatchEvent(new CustomEvent("amodomio:kds-config-updated"));
+}
+
+function deriveKdsZonesEndpoint(endpoint: string): string {
+    if (!endpoint) return "";
+    const replaced = endpoint.replace(/\/order(s)?\/?$/i, "/delivery-zones");
+    if (replaced !== endpoint) return replaced;
+    return `${endpoint.replace(/\/$/, "")}/delivery-zones`;
+}
+
+function parseKdsPollSeconds(value: string, fallback = 15): string {
+    const n = Number((value || "").replace(",", "."));
+    if (!Number.isFinite(n)) return String(fallback);
+    return String(Math.max(3, Math.min(300, Math.round(n))));
+}
+
+function normalizeKdsReadDate(value: string): string {
+    const v = (value || "").trim();
+    if (!v) return "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : "";
+}
+
 async function sendViaBackground(
     phone: string,
     message: string,
@@ -82,7 +146,7 @@ async function sendViaBackground(
     return new Promise<{ ok: boolean }>((resolve, reject) => {
         runtime.sendMessage(
             {
-                type: "ZAPI_SEND_TEXT",
+                type: ZAPI_SEND_MESSAGE_TYPE,
                 endpoint,
                 apiKey,
                 phone: e164,
@@ -119,8 +183,19 @@ function QuickReplies({
     const [endpoint, setEndpoint] = useState(() => getStoredConfig().endpoint);
     const [apiKey, setApiKey] = useState(() => getStoredConfig().apiKey);
     const [operator, setOperator] = useState(() => getStoredConfig().operator);
+    const [kdsEndpoint, setKdsEndpoint] = useState(() => getStoredKdsConfig().endpoint);
+    const [kdsApiKey, setKdsApiKey] = useState(() => getStoredKdsConfig().apiKey);
+    const [kdsZonesEndpoint, setKdsZonesEndpoint] = useState(() => getStoredKdsConfig().zonesEndpoint);
+    const [kdsQueueEndpoint, setKdsQueueEndpoint] = useState(() => getStoredKdsConfig().queueEndpoint || DEFAULT_KDS_QUEUE_READ_ENDPOINT);
+    const [kdsQueuePollSeconds, setKdsQueuePollSeconds] = useState(() => getStoredKdsConfig().queuePollSeconds || "15");
+    const [kdsQueueDate, setKdsQueueDate] = useState(() => getStoredKdsConfig().queueDate);
     const [status, setStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
+    const [settingsFeedback, setSettingsFeedback] = useState<{ kind: "success" | "error"; message: string } | null>(null);
+    const [settingsOpenSections, setSettingsOpenSections] = useState<{ zapi: boolean; kds: boolean }>({
+        zapi: true,
+        kds: false
+    });
     const [nameState, setNameState] = useState(() => (customerName || "").trim());
     const errorTimerRef = useRef<number | null>(null);
 
@@ -236,9 +311,36 @@ function QuickReplies({
             return;
         }
         saveStoredConfig({ endpoint, apiKey, operator });
-        setErrorMsg(null);
+        setSettingsFeedback({ kind: "success", message: "Configuração Z-API salva." });
         publishCardFeedback({ kind: "success", message: "Configuração Z-API salva.", autoHideMs: 5000 });
-        setMenu(null);
+    };
+
+    const handleSaveKds = () => {
+        if (!kdsEndpoint.trim()) {
+            const msg = "Configure o endpoint do KDS";
+            setSettingsFeedback({ kind: "error", message: msg });
+            publishCardFeedback({ kind: "error", message: msg, autoHideMs: 8000 });
+            return;
+        }
+        const effectiveZonesEndpoint = kdsZonesEndpoint.trim() || deriveKdsZonesEndpoint(kdsEndpoint);
+        const effectiveQueuePollSeconds = parseKdsPollSeconds(kdsQueuePollSeconds || "15", 15);
+        saveStoredKdsConfig({
+            endpoint: kdsEndpoint,
+            apiKey: kdsApiKey,
+            zonesEndpoint: effectiveZonesEndpoint,
+            queueEndpoint: kdsQueueEndpoint.trim(),
+            queuePollSeconds: effectiveQueuePollSeconds,
+            queueDate: normalizeKdsReadDate(kdsQueueDate)
+        });
+        setKdsZonesEndpoint(effectiveZonesEndpoint);
+        setKdsQueuePollSeconds(effectiveQueuePollSeconds);
+        setKdsQueueDate(normalizeKdsReadDate(kdsQueueDate));
+        setSettingsFeedback({ kind: "success", message: "Configuração KDS salva." });
+        publishCardFeedback({ kind: "success", message: "Configuração KDS salva.", autoHideMs: 5000 });
+    };
+
+    const toggleSettingsSection = (section: "zapi" | "kds") => {
+        setSettingsOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
     };
 
     return (
@@ -296,52 +398,231 @@ function QuickReplies({
 
             {menu === "settings" && (
                 <div style={{ ...menuStyle, minWidth: "280px" }} onClick={(e) => e.stopPropagation()}>
-                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 6 }}>Config Z-API</div>
-                    <div style={fieldStyle}>
-                        <label style={labelStyle} htmlFor="zapi-endpoint">
-                            Endpoint
-                        </label>
-                        <input
-                            id="zapi-endpoint"
-                            type="text"
-                            style={inputStyle}
-                            value={endpoint}
-                            onChange={(e) => setEndpoint(e.target.value)}
-                            className="placeholder:text-muted-foreground"
-                            placeholder={DEFAULT_ZAPI_ENDPOINT}
-                        />
+                    <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 8 }}>Config APIs</div>
+
+                    <div style={{ border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, marginBottom: 8, overflow: "hidden" }}>
+                        <button
+                            type="button"
+                            onClick={() => toggleSettingsSection("zapi")}
+                            style={{
+                                width: "100%",
+                                border: 0,
+                                background: "rgba(0,0,0,0.02)",
+                                padding: "8px 10px",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                cursor: "pointer",
+                                fontSize: 12,
+                                fontWeight: 700
+                            }}
+                        >
+                            <span>Z-API (WhatsApp)</span>
+                            <span>{settingsOpenSections.zapi ? "-" : "+"}</span>
+                        </button>
+                        {settingsOpenSections.zapi && (
+                            <div style={{ padding: "6px" }}>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="zapi-endpoint">
+                                        Endpoint
+                                    </label>
+                                    <input
+                                        id="zapi-endpoint"
+                                        type="text"
+                                        style={inputStyle}
+                                        value={endpoint}
+                                        onChange={(e) => setEndpoint(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder={DEFAULT_ZAPI_ENDPOINT}
+                                    />
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="zapi-apikey">
+                                        API key
+                                    </label>
+                                    <input
+                                        id="zapi-apikey"
+                                        type="text"
+                                        style={inputStyle}
+                                        value={apiKey}
+                                        onChange={(e) => setApiKey(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder="api-key"
+                                    />
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="zapi-operator">
+                                        Nome do operador (opcional)
+                                    </label>
+                                    <input
+                                        id="zapi-operator"
+                                        type="text"
+                                        style={inputStyle}
+                                        value={operator}
+                                        onChange={(e) => setOperator(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder="Fulano"
+                                    />
+                                </div>
+                                <button type="button" style={saveButtonStyle} onClick={handleSave}>
+                                    Salvar Z-API
+                                </button>
+                            </div>
+                        )}
                     </div>
-                    <div style={fieldStyle}>
-                        <label style={labelStyle} htmlFor="zapi-apikey">
-                            API key
-                        </label>
-                        <input
-                            id="zapi-apikey"
-                            type="text"
-                            style={inputStyle}
-                            value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
-                            className="placeholder:text-muted-foreground"
-                            placeholder="api-key"
-                        />
+
+                    <div style={{ border: "1px solid rgba(0,0,0,0.1)", borderRadius: 8, marginBottom: 4, overflow: "hidden" }}>
+                        <button
+                            type="button"
+                            onClick={() => toggleSettingsSection("kds")}
+                            style={{
+                                width: "100%",
+                                border: 0,
+                                background: "rgba(0,0,0,0.02)",
+                                padding: "8px 10px",
+                                display: "flex",
+                                alignItems: "center",
+                                justifyContent: "space-between",
+                                cursor: "pointer",
+                                fontSize: 12,
+                                fontWeight: 700
+                            }}
+                        >
+                            <span>KDS (REST API)</span>
+                            <span>{settingsOpenSections.kds ? "-" : "+"}</span>
+                        </button>
+                        {settingsOpenSections.kds && (
+                            <div style={{ padding: "6px" }}>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="kds-endpoint">
+                                        Endpoint pedido
+                                    </label>
+                                    <input
+                                        id="kds-endpoint"
+                                        type="text"
+                                        style={inputStyle}
+                                        value={kdsEndpoint}
+                                        onChange={(e) => setKdsEndpoint(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder="https://seu-servidor.com.br/api/kds/order"
+                                    />
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="kds-zones-endpoint">
+                                        Endpoint zonas (opcional)
+                                    </label>
+                                    <input
+                                        id="kds-zones-endpoint"
+                                        type="text"
+                                        style={inputStyle}
+                                        value={kdsZonesEndpoint}
+                                        onChange={(e) => setKdsZonesEndpoint(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder={deriveKdsZonesEndpoint(kdsEndpoint || "https://seu-servidor.com.br/api/kds/order")}
+                                    />
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="kds-apikey">
+                                        API key (opcional)
+                                    </label>
+                                    <input
+                                        id="kds-apikey"
+                                        type="text"
+                                        style={inputStyle}
+                                        value={kdsApiKey}
+                                        onChange={(e) => setKdsApiKey(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder="api-key"
+                                    />
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="kds-queue-endpoint">
+                                        Endpoint leitura fila (GET)
+                                    </label>
+                                    <input
+                                        id="kds-queue-endpoint"
+                                        type="text"
+                                        style={inputStyle}
+                                        value={kdsQueueEndpoint}
+                                        onChange={(e) => setKdsQueueEndpoint(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder={DEFAULT_KDS_QUEUE_READ_ENDPOINT}
+                                    />
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="kds-queue-poll-seconds">
+                                        Intervalo leitura (segundos)
+                                    </label>
+                                    <input
+                                        id="kds-queue-poll-seconds"
+                                        type="number"
+                                        min={3}
+                                        max={300}
+                                        step={1}
+                                        style={inputStyle}
+                                        value={kdsQueuePollSeconds}
+                                        onChange={(e) => setKdsQueuePollSeconds(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder="15"
+                                    />
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="kds-queue-date">
+                                        Data leitura (opcional YYYY-MM-DD)
+                                    </label>
+                                    <input
+                                        id="kds-queue-date"
+                                        type="text"
+                                        style={inputStyle}
+                                        value={kdsQueueDate}
+                                        onChange={(e) => setKdsQueueDate(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder="2026-02-26"
+                                    />
+                                </div>
+                                <button type="button" style={{ ...saveButtonStyle, background: "#059669" }} onClick={handleSaveKds}>
+                                    Salvar KDS
+                                </button>
+                            </div>
+                        )}
                     </div>
-                    <div style={fieldStyle}>
-                        <label style={labelStyle} htmlFor="zapi-operator">
-                            Nome do operador (opcional)
-                        </label>
-                        <input
-                            id="zapi-operator"
-                            type="text"
-                            style={inputStyle}
-                            value={operator}
-                            onChange={(e) => setOperator(e.target.value)}
-                            className="placeholder:text-muted-foreground"
-                            placeholder="Fulano"
-                        />
-                    </div>
-                    <button type="button" style={saveButtonStyle} onClick={handleSave}>
-                        Salvar
-                    </button>
+
+                    {settingsFeedback && (
+                        <div
+                            style={{
+                                color: settingsFeedback.kind === "error" ? "#b91c1c" : "#065f46",
+                                background: settingsFeedback.kind === "error" ? "#fef2f2" : "#ecfdf5",
+                                border: `1px solid ${settingsFeedback.kind === "error" ? "rgba(239,68,68,0.25)" : "rgba(16,185,129,0.25)"}`,
+                                borderRadius: 8,
+                                fontSize: 12,
+                                marginTop: 6,
+                                padding: "8px 10px",
+                                display: "flex",
+                                alignItems: "flex-start",
+                                justifyContent: "space-between",
+                                gap: 8
+                            }}
+                        >
+                            <span style={{ flex: "1 1 auto" }}>{settingsFeedback.message}</span>
+                            <button
+                                type="button"
+                                title="Fechar mensagem"
+                                onClick={() => setSettingsFeedback(null)}
+                                style={{
+                                    border: 0,
+                                    background: "transparent",
+                                    color: "inherit",
+                                    cursor: "pointer",
+                                    padding: 0,
+                                    lineHeight: 1,
+                                    fontSize: 16,
+                                    fontWeight: 700
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+                    )}
                     {errorMsg && (
                         <div
                             style={{

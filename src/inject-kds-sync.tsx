@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Banknote, Bike, CreditCard, Package, RefreshCw, Wallet } from "lucide-react";
+import { Banknote, Bike, Check, CreditCard, Loader2, Package, RefreshCw, Settings, Wallet } from "lucide-react";
 import ReactDOM from "react-dom/client";
 import { createPortal } from "react-dom";
 import { fieldStyle, inputStyle, labelStyle } from "./common/inject-ui-common";
@@ -15,27 +15,58 @@ const KDS_MARK_ATTR = "data-amodomio-kds";
 const DETAIL_SAVE_BUTTON_SELECTOR = 'button[ng-click="vm.save();"]';
 const DETAIL_MODAL_SELECTOR = ".modal-content";
 const DETAIL_SYNC_MARK_ATTR = "data-amodomio-kds-detail-sync";
+const KDS_SYNC_ORDER_MESSAGE = "KDS_SYNC_ORDER";
+const KDS_FETCH_ZONES_MESSAGE = "KDS_FETCH_ZONES";
+const KDS_FETCH_ORDER_QUEUE_MESSAGE = "KDS_FETCH_ORDER_QUEUE";
+const KDS_PATCH_ORDER_STATUS_MESSAGE = "KDS_PATCH_ORDER_STATUS";
+const KDS_QUEUE_BAR_MOUNT_ID = "amodomio-kds-queue-bar-root";
+const KDS_QUEUE_BAR_SPACER_ID = "amodomio-kds-queue-bar-spacer";
+const DEFAULT_KDS_QUEUE_READ_ENDPOINT = "https://amodomio.com.br/api/kds/orders";
 
 const commandContactByCard = new Map<string, { customerName: string; customerPhone: string }>();
 
 const KDS_STORAGE_KEYS = {
     endpoint: "amodomio-kds-endpoint",
     apiKey: "amodomio-kds-api-key",
-    zonesEndpoint: "amodomio-kds-zones-endpoint"
+    zonesEndpoint: "amodomio-kds-zones-endpoint",
+    queueEndpoint: "amodomio-kds-queue-endpoint",
+    queuePollSeconds: "amodomio-kds-queue-poll-seconds",
+    queueDate: "amodomio-kds-queue-date"
 };
 
 function getStoredKdsConfig() {
     return {
         endpoint: readStorage(KDS_STORAGE_KEYS.endpoint),
         apiKey: readStorage(KDS_STORAGE_KEYS.apiKey),
-        zonesEndpoint: readStorage(KDS_STORAGE_KEYS.zonesEndpoint)
+        zonesEndpoint: readStorage(KDS_STORAGE_KEYS.zonesEndpoint),
+        queueEndpoint: readStorage(KDS_STORAGE_KEYS.queueEndpoint),
+        queuePollSeconds: readStorage(KDS_STORAGE_KEYS.queuePollSeconds),
+        queueDate: readStorage(KDS_STORAGE_KEYS.queueDate)
     };
 }
 
-function saveStoredKdsConfig({ endpoint, apiKey, zonesEndpoint }: { endpoint: string; apiKey?: string; zonesEndpoint?: string }) {
+function saveStoredKdsConfig({
+    endpoint,
+    apiKey,
+    zonesEndpoint,
+    queueEndpoint,
+    queuePollSeconds,
+    queueDate
+}: {
+    endpoint: string;
+    apiKey?: string;
+    zonesEndpoint?: string;
+    queueEndpoint?: string;
+    queuePollSeconds?: string;
+    queueDate?: string;
+}) {
     writeStorage(KDS_STORAGE_KEYS.endpoint, endpoint);
     writeStorage(KDS_STORAGE_KEYS.apiKey, apiKey || "");
     writeStorage(KDS_STORAGE_KEYS.zonesEndpoint, zonesEndpoint || "");
+    writeStorage(KDS_STORAGE_KEYS.queueEndpoint, queueEndpoint || "");
+    writeStorage(KDS_STORAGE_KEYS.queuePollSeconds, queuePollSeconds || "");
+    writeStorage(KDS_STORAGE_KEYS.queueDate, queueDate || "");
+    window.dispatchEvent(new CustomEvent("amodomio:kds-config-updated"));
 }
 
 async function sendKdsOrder(payload: Record<string, unknown>, config?: { endpoint: string; apiKey?: string }) {
@@ -50,7 +81,7 @@ async function sendKdsOrder(payload: Record<string, unknown>, config?: { endpoin
     return new Promise<{ ok: boolean; data?: unknown }>((resolve, reject) => {
         runtime.sendMessage(
             {
-                type: "KDS_ORDER",
+                type: KDS_SYNC_ORDER_MESSAGE,
                 endpoint,
                 apiKey,
                 payload
@@ -85,6 +116,117 @@ function deriveZonesEndpoint(endpoint: string): string {
     const replaced = endpoint.replace(/\/order(s)?\/?$/i, "/delivery-zones");
     if (replaced !== endpoint) return replaced;
     return `${endpoint.replace(/\/$/, "")}/delivery-zones`;
+}
+
+function deriveQueueEndpoint(endpoint: string): string {
+    if (!endpoint) return "";
+    const replaced = endpoint.replace(/\/order(s)?\/?$/i, "/orders");
+    if (replaced !== endpoint) return replaced;
+    return `${endpoint.replace(/\/$/, "")}/orders`;
+}
+
+function parsePollSeconds(value?: string | null, fallback = 15): number {
+    const n = Number((value || "").replace(",", "."));
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(3, Math.min(300, Math.round(n)));
+}
+
+function normalizeKdsReadDate(value?: string | null): string {
+    const v = (value || "").trim();
+    if (!v) return "";
+    return /^\d{4}-\d{2}-\d{2}$/.test(v) ? v : "";
+}
+
+function buildKdsOrdersReadUrl(endpoint: string, date?: string): string {
+    const safeDate = normalizeKdsReadDate(date);
+    if (!safeDate) return endpoint;
+    try {
+        const url = new URL(endpoint);
+        url.searchParams.set("date", safeDate);
+        return url.toString();
+    } catch {
+        const joiner = endpoint.includes("?") ? "&" : "?";
+        return `${endpoint}${joiner}date=${encodeURIComponent(safeDate)}`;
+    }
+}
+
+function getLocalDateYmd(): string {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = String(now.getMonth() + 1).padStart(2, "0");
+    const d = String(now.getDate()).padStart(2, "0");
+    return `${y}-${m}-${d}`;
+}
+
+async function fetchKdsOrderQueue(config?: { endpoint?: string; apiKey?: string; date?: string }) {
+    const stored = getStoredKdsConfig();
+    const endpoint = config?.endpoint?.trim() || stored.queueEndpoint || deriveQueueEndpoint(stored.endpoint) || DEFAULT_KDS_QUEUE_READ_ENDPOINT;
+    const apiKey = config?.apiKey?.trim() || stored.apiKey;
+    const date = normalizeKdsReadDate(config?.date ?? stored.queueDate);
+
+    if (!endpoint) throw new Error("Configure o endpoint de leitura da fila KDS");
+    if (!apiKey) throw new Error("Configure a API key do KDS para leitura");
+
+    const runtime = typeof chrome !== "undefined" && chrome?.runtime ? chrome.runtime : null;
+    if (!runtime) throw new Error("chrome.runtime indisponível");
+
+    return new Promise<any>((resolve, reject) => {
+        runtime.sendMessage(
+            {
+                type: KDS_FETCH_ORDER_QUEUE_MESSAGE,
+                endpoint: buildKdsOrdersReadUrl(endpoint, date),
+                apiKey
+            },
+            (response: { error?: string; data?: any }) => {
+                const lastErr = runtime?.lastError;
+                if (lastErr) {
+                    reject(new Error(lastErr.message));
+                    return;
+                }
+                if (response?.error) {
+                    reject(new Error(response.error));
+                    return;
+                }
+                resolve(response?.data);
+            }
+        );
+    });
+}
+
+async function patchKdsOrderStatus(config: { endpoint?: string; apiKey?: string; date?: string; commandNumber: string; status: string }) {
+    const stored = getStoredKdsConfig();
+    const endpoint = config.endpoint?.trim() || stored.queueEndpoint || deriveQueueEndpoint(stored.endpoint) || DEFAULT_KDS_QUEUE_READ_ENDPOINT;
+    const apiKey = config.apiKey?.trim() || stored.apiKey;
+    const date = normalizeKdsReadDate(config.date ?? stored.queueDate) || getLocalDateYmd();
+    const commandNumber = Number(String(config.commandNumber).trim());
+
+    if (!endpoint) throw new Error("Configure o endpoint de leitura KDS");
+    if (!apiKey) throw new Error("Configure a API key do KDS");
+    if (!Number.isFinite(commandNumber) || commandNumber <= 0) throw new Error("Comanda inválida");
+
+    const runtime = typeof chrome !== "undefined" && chrome?.runtime ? chrome.runtime : null;
+    if (!runtime) throw new Error("chrome.runtime indisponível");
+
+    return new Promise<any>((resolve, reject) => {
+        runtime.sendMessage(
+            {
+                type: KDS_PATCH_ORDER_STATUS_MESSAGE,
+                endpoint,
+                apiKey,
+                payload: {
+                    date,
+                    commandNumber,
+                    status: config.status
+                }
+            },
+            (response: { error?: string; data?: any }) => {
+                const lastErr = runtime?.lastError;
+                if (lastErr) return reject(new Error(lastErr.message));
+                if (response?.error) return reject(new Error(response.error));
+                resolve(response?.data);
+            }
+        );
+    });
 }
 
 function parseNumberText(value?: string | null): number {
@@ -140,6 +282,592 @@ type KdsDetailDraft = {
     sizeFT: string;
     items: DetailExtractedItem[];
 };
+
+type KdsQueueSnapshot = {
+    aguardandoForno: string[];
+    assando: string[];
+};
+type QueueCommandUiState = "idle" | "loading" | "success";
+
+function normalizeStatusText(value: unknown): string {
+    return String(value || "")
+        .normalize("NFD")
+        .replace(/[\u0300-\u036f]/g, "")
+        .replace(/[\s_-]+/g, "")
+        .toLowerCase();
+}
+
+function normalizeCommandNumber(value: unknown): string {
+    const raw = String(value ?? "").trim();
+    if (!raw) return "";
+    const onlyDigits = raw.match(/\d+/)?.[0] || "";
+    return onlyDigits || raw;
+}
+
+function readCommandNumberFromObject(obj: Record<string, unknown>): string {
+    const candidates = [
+        obj.commandNumber,
+        obj.comanda,
+        obj.command,
+        obj.saleNumber,
+        obj.orderNumber,
+        obj.numeroComanda,
+        obj.numero
+    ];
+    for (const candidate of candidates) {
+        const number = normalizeCommandNumber(candidate);
+        if (number) return number;
+    }
+    return "";
+}
+
+function extractQueueArray(data: any): any[] {
+    if (Array.isArray(data)) return data;
+    if (!data || typeof data !== "object") return [];
+    if (data.mode === "list" && Array.isArray(data.orders)) return data.orders;
+    if (Array.isArray(data.data)) return data.data;
+    if (Array.isArray(data.items)) return data.items;
+    if (Array.isArray(data.orders)) return data.orders;
+    if (Array.isArray(data.rows)) return data.rows;
+    return [];
+}
+
+function parseKdsQueueSnapshot(data: unknown): KdsQueueSnapshot {
+    const empty: KdsQueueSnapshot = { aguardandoForno: [], assando: [] };
+    if (!data) return empty;
+
+    if (typeof data === "object" && !Array.isArray(data)) {
+        const payload = data as Record<string, unknown>;
+        if (payload.mode === "list" && Array.isArray(payload.orders)) {
+            const result: KdsQueueSnapshot = { aguardandoForno: [], assando: [] };
+            for (const item of payload.orders as unknown[]) {
+                if (!item || typeof item !== "object") continue;
+                const row = item as Record<string, unknown>;
+                const status = normalizeStatusText(row.status);
+                const commandNumber = normalizeCommandNumber(row.commandNumber);
+                if (!commandNumber) continue;
+                if (status === "aguardandoforno") result.aguardandoForno.push(commandNumber);
+                if (status === "assando") result.assando.push(commandNumber);
+            }
+            return result;
+        }
+        const byStatus = payload.byStatus && typeof payload.byStatus === "object" ? (payload.byStatus as Record<string, unknown>) : null;
+        const directAguardando = (byStatus?.aguardandoForno ?? payload.aguardandoForno) as unknown;
+        const directAssando = (byStatus?.assando ?? payload.assando) as unknown;
+        if (Array.isArray(directAguardando) || Array.isArray(directAssando)) {
+            const mapList = (list: unknown) =>
+                (Array.isArray(list) ? list : [])
+                    .map((item) => {
+                        if (typeof item === "object" && item) return readCommandNumberFromObject(item as Record<string, unknown>);
+                        return normalizeCommandNumber(item);
+                    })
+                    .filter(Boolean);
+            return {
+                aguardandoForno: mapList(directAguardando),
+                assando: mapList(directAssando)
+            };
+        }
+    }
+
+    const list = extractQueueArray(data);
+    const result: KdsQueueSnapshot = { aguardandoForno: [], assando: [] };
+    for (const item of list) {
+        if (!item || typeof item !== "object") continue;
+        const row = item as Record<string, unknown>;
+        const status = normalizeStatusText(row.status ?? row.kdsStatus ?? row.stage ?? row.state ?? row.situation);
+        const commandNumber = readCommandNumberFromObject(row);
+        if (!commandNumber) continue;
+        if (status === "aguardandoforno") result.aguardandoForno.push(commandNumber);
+        if (status === "assando") result.assando.push(commandNumber);
+    }
+    return result;
+}
+
+function QueueColumn({
+    tone,
+    commandNumbers,
+    onCommandClick,
+    commandUiStateById
+}: {
+    tone: "amber" | "orange";
+    commandNumbers: string[];
+    onCommandClick?: (commandNumber: string) => void;
+    commandUiStateById?: Record<string, QueueCommandUiState>;
+}) {
+    const colors =
+        tone === "amber"
+            ? { bg: "#fff7d6", border: "rgba(245,158,11,0.35)" }
+            : { bg: "#ffe5cf", border: "rgba(249,115,22,0.35)" };
+
+    return (
+        <div
+            style={{
+                minWidth: 0,
+                display: "flex",
+                alignItems: "center",
+                gap: 4,
+                padding: "0 6px",
+                background: colors.bg,
+                border: `1px solid ${colors.border}`,
+                borderRadius: 6,
+                minHeight: 28
+            }}
+        >
+            <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 4, flexWrap: "wrap", flex: "1 1 auto" }}>
+                {commandNumbers.length === 0 ? <span style={{ fontSize: 10, color: "#6b7280" }}>-</span> : null}
+                {commandNumbers.slice(0, 18).map((n) => {
+                    const uiState = commandUiStateById?.[n] || "idle";
+                    const isLoading = uiState === "loading";
+                    const isSuccess = uiState === "success";
+                    return (
+                        <button
+                            type="button"
+                            key={`${tone}-${n}`}
+                            onClick={() => onCommandClick?.(n)}
+                            disabled={isLoading || isSuccess}
+                            style={{
+                                fontSize: 13,
+                                lineHeight: 1.1,
+                                padding: "1px 6px",
+                                minWidth: 28,
+                                minHeight: 22,
+                                borderRadius: 999,
+                                background: isSuccess ? "#dcfce7" : "#fff",
+                                border: "1px solid rgba(17,24,39,0.10)",
+                                color: "#111827",
+                                fontWeight: 700,
+                                cursor: isLoading ? "progress" : isSuccess ? "default" : "pointer",
+                                opacity: isSuccess ? 0 : isLoading ? 0.9 : 1,
+                                transform: isSuccess ? "translateY(-6px) scale(0.86)" : "translateY(0) scale(1)",
+                                transition: "opacity 260ms ease, transform 260ms cubic-bezier(.2,.8,.2,1), background-color 180ms ease",
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center"
+                            }}
+                            title={
+                                isLoading
+                                    ? `Finalizando comanda ${n}...`
+                                    : isSuccess
+                                      ? `Comanda ${n} finalizada`
+                                      : `Finalizar comanda ${n}`
+                            }
+                        >
+                            {isLoading ? (
+                                <Loader2 size={14} style={{ animation: "amodomio-kds-spin 0.8s linear infinite" }} />
+                            ) : isSuccess ? (
+                                <Check size={14} color="#15803d" />
+                            ) : (
+                                n
+                            )}
+                        </button>
+                    );
+                })}
+                {commandNumbers.length > 18 && <span style={{ fontSize: 10, color: "#6b7280" }}>+{commandNumbers.length - 18}</span>}
+            </div>
+        </div>
+    );
+}
+
+function KdsQueueTopBar() {
+    const [snapshot, setSnapshot] = useState<KdsQueueSnapshot>({ aguardandoForno: [], assando: [] });
+    const [status, setStatus] = useState<"idle" | "loading" | "ok" | "error">("idle");
+    const [errorMsg, setErrorMsg] = useState("");
+    const [topOffset, setTopOffset] = useState(48);
+    const [headerLeft, setHeaderLeft] = useState(0);
+    const [headerWidth, setHeaderWidth] = useState<number | null>(null);
+    const [configOpen, setConfigOpen] = useState(false);
+    const [cfgEndpoint, setCfgEndpoint] = useState("");
+    const [cfgApiKey, setCfgApiKey] = useState("");
+    const [cfgPollSeconds, setCfgPollSeconds] = useState("15");
+    const [cfgDate, setCfgDate] = useState("");
+    const [commandUiStateById, setCommandUiStateById] = useState<Record<string, QueueCommandUiState>>({});
+    const manualRefreshRef = useRef<(() => void) | null>(null);
+
+    useEffect(() => {
+        const styleId = "amodomio-kds-queue-animations";
+        if (document.getElementById(styleId)) return;
+        const styleEl = document.createElement("style");
+        styleEl.id = styleId;
+        styleEl.textContent = `
+          @keyframes amodomio-kds-spin {
+            from { transform: rotate(0deg); }
+            to { transform: rotate(360deg); }
+          }
+        `;
+        document.head.appendChild(styleEl);
+    }, []);
+
+    useEffect(() => {
+        const cfg = getStoredKdsConfig();
+        setCfgEndpoint(cfg.queueEndpoint || deriveQueueEndpoint(cfg.endpoint) || DEFAULT_KDS_QUEUE_READ_ENDPOINT);
+        setCfgApiKey(cfg.apiKey);
+        setCfgPollSeconds(cfg.queuePollSeconds || "15");
+        setCfgDate(cfg.queueDate || "");
+    }, []);
+
+    useEffect(() => {
+        const BAR_HEIGHT = 30;
+        const updateHeaderAnchor = () => {
+            const headerEl =
+                document.querySelector<HTMLElement>("#header") ||
+                document.querySelector<HTMLElement>("header#header") ||
+                document.querySelector<HTMLElement>("header");
+            const rect = headerEl?.getBoundingClientRect();
+            const nextTop = rect ? Math.max(0, Math.round(rect.bottom)) : 48;
+            setTopOffset(nextTop);
+            setHeaderLeft(rect ? Math.round(rect.left) : 0);
+            setHeaderWidth(rect ? Math.round(rect.width) : null);
+
+            const spacer = document.getElementById(KDS_QUEUE_BAR_SPACER_ID) as HTMLDivElement | null;
+            if (spacer) {
+                spacer.style.height = `${BAR_HEIGHT + 2}px`;
+            }
+        };
+
+        updateHeaderAnchor();
+        window.addEventListener("resize", updateHeaderAnchor);
+        window.addEventListener("scroll", updateHeaderAnchor, { passive: true });
+        const timer = window.setInterval(updateHeaderAnchor, 1500);
+        return () => {
+            window.removeEventListener("resize", updateHeaderAnchor);
+            window.removeEventListener("scroll", updateHeaderAnchor);
+            window.clearInterval(timer);
+        };
+    }, []);
+
+    useEffect(() => {
+        let cancelled = false;
+        let intervalId: number | null = null;
+
+        const run = async () => {
+            const cfg = getStoredKdsConfig();
+            const queueEndpoint = cfg.queueEndpoint || deriveQueueEndpoint(cfg.endpoint) || DEFAULT_KDS_QUEUE_READ_ENDPOINT;
+            if (!queueEndpoint) {
+                if (!cancelled) {
+                    setSnapshot({ aguardandoForno: [], assando: [] });
+                    setStatus("idle");
+                    setErrorMsg("Configure endpoint de leitura KDS");
+                }
+                return;
+            }
+            if (!cancelled) {
+                setStatus((prev) => (prev === "ok" ? "ok" : "loading"));
+                setErrorMsg("");
+            }
+            try {
+                const data = await fetchKdsOrderQueue({ endpoint: queueEndpoint, apiKey: cfg.apiKey });
+                if (cancelled) return;
+                setSnapshot(parseKdsQueueSnapshot(data));
+                setStatus("ok");
+                setErrorMsg("");
+            } catch (err) {
+                if (cancelled) return;
+                setStatus("error");
+                setErrorMsg(err instanceof Error ? err.message : "Falha ao ler fila KDS");
+            }
+        };
+
+        manualRefreshRef.current = () => {
+            void run();
+        };
+
+        run();
+        const seconds = parsePollSeconds(getStoredKdsConfig().queuePollSeconds || "15", 15);
+        intervalId = window.setInterval(run, seconds * 1000);
+
+        const onStorage = (e: StorageEvent) => {
+            if (!e.key) return;
+            if (!Object.values(KDS_STORAGE_KEYS).includes(e.key as any)) return;
+            run();
+            const nextSeconds = parsePollSeconds(getStoredKdsConfig().queuePollSeconds || "15", 15);
+            if (intervalId) window.clearInterval(intervalId);
+            intervalId = window.setInterval(run, nextSeconds * 1000);
+        };
+        const onLocalConfigUpdated = () => {
+            run();
+            const nextSeconds = parsePollSeconds(getStoredKdsConfig().queuePollSeconds || "15", 15);
+            if (intervalId) window.clearInterval(intervalId);
+            intervalId = window.setInterval(run, nextSeconds * 1000);
+        };
+        window.addEventListener("storage", onStorage);
+        window.addEventListener("amodomio:kds-config-updated", onLocalConfigUpdated as EventListener);
+
+        return () => {
+            cancelled = true;
+            manualRefreshRef.current = null;
+            if (intervalId) window.clearInterval(intervalId);
+            window.removeEventListener("storage", onStorage);
+            window.removeEventListener("amodomio:kds-config-updated", onLocalConfigUpdated as EventListener);
+        };
+    }, []);
+
+    const hasData = snapshot.aguardandoForno.length > 0 || snapshot.assando.length > 0;
+    const statusColor = status === "error" ? "#b91c1c" : status === "loading" ? "#b45309" : "#64748b";
+    const removeCommandFromSnapshot = (commandNumber: string) => {
+        setSnapshot((prev) => ({
+            aguardandoForno: prev.aguardandoForno.filter((n) => n !== commandNumber),
+            assando: prev.assando.filter((n) => n !== commandNumber)
+        }));
+        setCommandUiStateById((prev) => {
+            if (!prev[commandNumber]) return prev;
+            const next = { ...prev };
+            delete next[commandNumber];
+            return next;
+        });
+    };
+    const handleFinalizeCommand = async (commandNumber: string) => {
+        if (!commandNumber) return;
+        if (commandUiStateById[commandNumber] === "loading" || commandUiStateById[commandNumber] === "success") return;
+        setCommandUiStateById((prev) => ({ ...prev, [commandNumber]: "loading" }));
+        try {
+            const cfg = getStoredKdsConfig();
+            await patchKdsOrderStatus({
+                endpoint: cfg.queueEndpoint || deriveQueueEndpoint(cfg.endpoint) || DEFAULT_KDS_QUEUE_READ_ENDPOINT,
+                apiKey: cfg.apiKey,
+                date: cfg.queueDate,
+                commandNumber,
+                status: "finalizado"
+            });
+            setCommandUiStateById((prev) => ({ ...prev, [commandNumber]: "success" }));
+            window.setTimeout(() => removeCommandFromSnapshot(commandNumber), 260);
+            setStatus("ok");
+            setErrorMsg("");
+        } catch (err) {
+            setStatus("error");
+            setErrorMsg(err instanceof Error ? err.message : "Falha ao finalizar pedido");
+            setCommandUiStateById((prev) => {
+                const next = { ...prev };
+                delete next[commandNumber];
+                return next;
+            });
+        }
+    };
+    const saveQuickConfig = () => {
+        const current = getStoredKdsConfig();
+        saveStoredKdsConfig({
+            endpoint: current.endpoint,
+            zonesEndpoint: current.zonesEndpoint,
+            apiKey: cfgApiKey,
+            queueEndpoint: cfgEndpoint.trim(),
+            queuePollSeconds: String(parsePollSeconds(cfgPollSeconds || "15", 15)),
+            queueDate: normalizeKdsReadDate(cfgDate)
+        });
+        setCfgPollSeconds(String(parsePollSeconds(cfgPollSeconds || "15", 15)));
+        setCfgDate(normalizeKdsReadDate(cfgDate));
+        setConfigOpen(false);
+    };
+
+    return (
+        <div
+            style={{
+                position: "fixed",
+                top: topOffset,
+                left: headerLeft,
+                width: headerWidth ? `${headerWidth}px` : "100vw",
+                zIndex: 2147483000,
+                padding: 0,
+                pointerEvents: "none"
+            }}
+        >
+            <div
+                style={{
+                    background: "#f8fafc",
+                    border: "1px solid rgba(37,99,235,0.12)",
+                    borderRadius: "0 0 8px 8px",
+                    boxShadow: "0 2px 8px rgba(15,23,42,0.06)",
+                    padding: "0 6px",
+                    margin: 0,
+                    pointerEvents: "auto"
+                }}
+            >
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "center" }}>
+                    <QueueColumn
+                        tone="amber"
+                        commandNumbers={snapshot.aguardandoForno}
+                        onCommandClick={handleFinalizeCommand}
+                        commandUiStateById={commandUiStateById}
+                    />
+                    <QueueColumn
+                        tone="orange"
+                        commandNumbers={snapshot.assando}
+                        onCommandClick={handleFinalizeCommand}
+                        commandUiStateById={commandUiStateById}
+                    />
+                    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4 }}>
+                        <span
+                            title={
+                                status === "error"
+                                    ? errorMsg || "Falha na leitura KDS"
+                                    : status === "loading"
+                                      ? "Atualizando fila KDS"
+                                      : hasData
+                                        ? "Fila KDS atualizada"
+                                        : "KDS sem itens"
+                            }
+                            style={{
+                                width: 8,
+                                height: 8,
+                                borderRadius: 999,
+                                background: statusColor,
+                                opacity: status === "idle" ? 0.8 : 1
+                            }}
+                        />
+                        <button
+                            type="button"
+                            title="Atualizar fila KDS"
+                            onClick={() => manualRefreshRef.current?.()}
+                            style={{
+                                border: "1px solid rgba(17,24,39,0.14)",
+                                background: "#fff",
+                                color: "#334155",
+                                width: 24,
+                                height: 24,
+                                borderRadius: 6,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                cursor: "pointer",
+                                padding: 0
+                            }}
+                        >
+                            <RefreshCw size={13} style={status === "loading" ? { animation: "amodomio-kds-spin 0.8s linear infinite" } : undefined} />
+                        </button>
+                        <button
+                            type="button"
+                            title="Configurações KDS (leitura)"
+                            onClick={() => setConfigOpen((prev) => !prev)}
+                            style={{
+                                border: "1px solid rgba(17,24,39,0.14)",
+                                background: "#fff",
+                                color: "#334155",
+                                width: 24,
+                                height: 24,
+                                borderRadius: 6,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                cursor: "pointer",
+                                padding: 0
+                            }}
+                        >
+                            <Settings size={13} />
+                        </button>
+                        {configOpen && (
+                            <div
+                                style={{
+                                    position: "absolute",
+                                    top: 28,
+                                    right: 0,
+                                    width: "min(360px, calc(100vw - 24px))",
+                                    background: "#fff",
+                                    border: "1px solid rgba(17,24,39,0.12)",
+                                    borderRadius: 8,
+                                    boxShadow: "0 10px 24px rgba(0,0,0,0.12)",
+                                    padding: 8,
+                                    zIndex: 20
+                                }}
+                            >
+                                <div style={{ ...fieldStyle, padding: "0 0 6px" }}>
+                                    <label style={{ ...labelStyle, fontSize: 11 }} htmlFor="kds-topbar-endpoint">
+                                        Endpoint leitura (GET)
+                                    </label>
+                                    <input
+                                        id="kds-topbar-endpoint"
+                                        type="text"
+                                        style={{ ...inputStyle, padding: "8px 10px", fontSize: 12, borderRadius: 8 }}
+                                        value={cfgEndpoint}
+                                        onChange={(e) => setCfgEndpoint(e.target.value)}
+                                        placeholder={DEFAULT_KDS_QUEUE_READ_ENDPOINT}
+                                    />
+                                </div>
+                                <div style={{ ...fieldStyle, padding: "0 0 6px" }}>
+                                    <label style={{ ...labelStyle, fontSize: 11 }} htmlFor="kds-topbar-apikey">
+                                        API key
+                                    </label>
+                                    <input
+                                        id="kds-topbar-apikey"
+                                        type="text"
+                                        style={{ ...inputStyle, padding: "8px 10px", fontSize: 12, borderRadius: 8 }}
+                                        value={cfgApiKey}
+                                        onChange={(e) => setCfgApiKey(e.target.value)}
+                                        placeholder="api-key"
+                                    />
+                                </div>
+                                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                                    <div style={{ ...fieldStyle, padding: 0 }}>
+                                        <label style={{ ...labelStyle, fontSize: 11 }} htmlFor="kds-topbar-poll">
+                                            Intervalo (s)
+                                        </label>
+                                        <input
+                                            id="kds-topbar-poll"
+                                            type="number"
+                                            min={3}
+                                            max={300}
+                                            step={1}
+                                            style={{ ...inputStyle, padding: "8px 10px", fontSize: 12, borderRadius: 8 }}
+                                            value={cfgPollSeconds}
+                                            onChange={(e) => setCfgPollSeconds(e.target.value)}
+                                            placeholder="15"
+                                        />
+                                    </div>
+                                    <div style={{ ...fieldStyle, padding: 0 }}>
+                                        <label style={{ ...labelStyle, fontSize: 11 }} htmlFor="kds-topbar-date">
+                                            Data (opcional)
+                                        </label>
+                                        <input
+                                            id="kds-topbar-date"
+                                            type="text"
+                                            style={{ ...inputStyle, padding: "8px 10px", fontSize: 12, borderRadius: 8 }}
+                                            value={cfgDate}
+                                            onChange={(e) => setCfgDate(e.target.value)}
+                                            placeholder="YYYY-MM-DD"
+                                        />
+                                    </div>
+                                </div>
+                                {status === "error" && errorMsg ? (
+                                    <div style={{ marginTop: 6, fontSize: 11, color: "#b91c1c" }}>{errorMsg}</div>
+                                ) : null}
+                                <div style={{ display: "flex", justifyContent: "flex-end", gap: 6, marginTop: 8 }}>
+                                    <button
+                                        type="button"
+                                        onClick={() => setConfigOpen(false)}
+                                        style={{
+                                            border: "1px solid rgba(17,24,39,0.12)",
+                                            background: "#fff",
+                                            color: "#334155",
+                                            borderRadius: 6,
+                                            padding: "6px 8px",
+                                            fontSize: 11,
+                                            cursor: "pointer"
+                                        }}
+                                    >
+                                        Fechar
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={saveQuickConfig}
+                                        style={{
+                                            border: 0,
+                                            background: "#2563eb",
+                                            color: "#fff",
+                                            borderRadius: 6,
+                                            padding: "6px 8px",
+                                            fontSize: 11,
+                                            fontWeight: 700,
+                                            cursor: "pointer"
+                                        }}
+                                    >
+                                        Salvar
+                                    </button>
+                                </div>
+                            </div>
+                        )}
+                    </div>
+                </div>
+            </div>
+        </div>
+    );
+}
 
 function extractItemsFromDetailModal(modalEl: Element): DetailExtractedItem[] {
     const rows = Array.from(modalEl.querySelectorAll<HTMLElement>('[data-qa^="sale-item-selected-"]'));
@@ -228,6 +956,9 @@ export function KdsSyncButton({
     const [endpoint, setEndpoint] = useState(() => getStoredKdsConfig().endpoint);
     const [apiKey, setApiKey] = useState(() => getStoredKdsConfig().apiKey);
     const [zonesEndpoint, setZonesEndpoint] = useState(() => getStoredKdsConfig().zonesEndpoint);
+    const [queueEndpoint, setQueueEndpoint] = useState(() => getStoredKdsConfig().queueEndpoint || DEFAULT_KDS_QUEUE_READ_ENDPOINT);
+    const [queuePollSeconds, setQueuePollSeconds] = useState(() => getStoredKdsConfig().queuePollSeconds || "15");
+    const [queueDate, setQueueDate] = useState(() => getStoredKdsConfig().queueDate);
     const [status, setStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [zones, setZones] = useState<DeliveryZone[]>([]);
@@ -290,7 +1021,7 @@ export function KdsSyncButton({
                 const data = await new Promise<any>((resolve, reject) => {
                     runtime.sendMessage(
                         {
-                            type: "KDS_ZONES",
+                            type: KDS_FETCH_ZONES_MESSAGE,
                             endpoint: effectiveZonesEndpoint,
                             apiKey
                         },
@@ -349,7 +1080,16 @@ export function KdsSyncButton({
     };
 
     const handleSave = () => {
-        saveStoredKdsConfig({ endpoint, apiKey, zonesEndpoint });
+        saveStoredKdsConfig({
+            endpoint,
+            apiKey,
+            zonesEndpoint,
+            queueEndpoint,
+            queuePollSeconds: String(parsePollSeconds(queuePollSeconds || "15", 15)),
+            queueDate: normalizeKdsReadDate(queueDate)
+        });
+        setQueuePollSeconds(String(parsePollSeconds(queuePollSeconds || "15", 15)));
+        setQueueDate(normalizeKdsReadDate(queueDate));
         setSettingsOpen(false);
     };
 
@@ -989,6 +1729,51 @@ export function KdsSyncButton({
                                         placeholder="api-key"
                                     />
                                 </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="kds-queue-endpoint">
+                                        Endpoint leitura fila (GET)
+                                    </label>
+                                    <input
+                                        id="kds-queue-endpoint"
+                                        type="text"
+                                        style={inputStyle}
+                                        value={queueEndpoint}
+                                        onChange={(e) => setQueueEndpoint(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder={DEFAULT_KDS_QUEUE_READ_ENDPOINT}
+                                    />
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="kds-queue-poll-seconds">
+                                        Intervalo leitura (segundos)
+                                    </label>
+                                    <input
+                                        id="kds-queue-poll-seconds"
+                                        type="number"
+                                        min={3}
+                                        max={300}
+                                        step={1}
+                                        style={inputStyle}
+                                        value={queuePollSeconds}
+                                        onChange={(e) => setQueuePollSeconds(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder="15"
+                                    />
+                                </div>
+                                <div style={fieldStyle}>
+                                    <label style={labelStyle} htmlFor="kds-queue-date">
+                                        Data leitura (opcional YYYY-MM-DD)
+                                    </label>
+                                    <input
+                                        id="kds-queue-date"
+                                        type="text"
+                                        style={inputStyle}
+                                        value={queueDate}
+                                        onChange={(e) => setQueueDate(e.target.value)}
+                                        className="placeholder:text-muted-foreground"
+                                        placeholder="2026-02-26"
+                                    />
+                                </div>
                                 <button type="button" style={saveButtonStyle} onClick={handleSave}>
                                     Salvar
                                 </button>
@@ -1116,7 +1901,48 @@ function scanAll() {
     document.querySelectorAll<HTMLButtonElement>(DETAIL_SAVE_BUTTON_SELECTOR).forEach((btn) => mountKdsOnDetailSaveButton(btn));
 }
 
+function mountKdsQueueTopBar() {
+    let mount = document.getElementById(KDS_QUEUE_BAR_MOUNT_ID) as HTMLDivElement | null;
+    if (!mount) {
+        mount = document.createElement("div");
+        mount.id = KDS_QUEUE_BAR_MOUNT_ID;
+    }
+    let spacer = document.getElementById(KDS_QUEUE_BAR_SPACER_ID) as HTMLDivElement | null;
+    if (!spacer) {
+        spacer = document.createElement("div");
+        spacer.id = KDS_QUEUE_BAR_SPACER_ID;
+        spacer.style.width = "100%";
+        spacer.style.height = "32px";
+        spacer.style.pointerEvents = "none";
+        spacer.style.display = "block";
+    }
+
+    const headerAnchor =
+        document.querySelector<HTMLElement>("#header") ||
+        document.querySelector<HTMLElement>("header#header") ||
+        document.querySelector<HTMLElement>("header");
+
+    if (headerAnchor?.parentElement) {
+        if (headerAnchor.nextElementSibling !== spacer) {
+            headerAnchor.insertAdjacentElement("afterend", spacer);
+        }
+        if (mount.parentElement !== document.body) {
+            document.body.appendChild(mount);
+        }
+    } else if (mount.parentElement !== document.body) {
+        document.body.appendChild(mount);
+        if (spacer.parentElement !== document.body) {
+            document.body.prepend(spacer);
+        }
+    }
+    const existingRoot = (mount as any).__reactRoot as ReturnType<typeof ReactDOM.createRoot> | undefined;
+    const root = existingRoot || ReactDOM.createRoot(mount);
+    (mount as any).__reactRoot = root;
+    root.render(<KdsQueueTopBar />);
+}
+
 export function initKdsSync() {
+    mountKdsQueueTopBar();
     scanAll();
 
     const isLocalhost =
@@ -1153,6 +1979,7 @@ export function initKdsSync() {
     }
 
     const obs = new MutationObserver((list) => {
+        mountKdsQueueTopBar();
         for (const mut of list) {
             mut.addedNodes.forEach((n) => {
                 if (n.nodeType !== Node.ELEMENT_NODE) return;
