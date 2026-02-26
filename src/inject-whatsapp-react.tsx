@@ -51,11 +51,15 @@ function toE164(text: string): string {
 
 function getStoredConfig() {
     return {
+<<<<<<< HEAD
 <<<<<<< Updated upstream
         endpoint: readStorage(STORAGE_KEYS.endpoint),
 =======
         endpoint: readStorage(STORAGE_KEYS.endpoint) || DEFAULT_ZAPI_ENDPOINT,
 >>>>>>> Stashed changes
+=======
+        endpoint: readStorage(STORAGE_KEYS.endpoint),
+>>>>>>> kds-rest-api
         apiKey: readStorage(STORAGE_KEYS.apiKey),
         operator: readStorage(STORAGE_KEYS.operator)
     };
