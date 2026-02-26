@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from "react";
-import { Banknote, Bike, Check, CreditCard, Loader2, Package, RefreshCw, Settings, Wallet } from "lucide-react";
+import { Banknote, Bike, Check, ChevronLeft, ChevronRight, CreditCard, Loader2, Package, RefreshCw, Settings, Wallet } from "lucide-react";
 import ReactDOM from "react-dom/client";
 import { createPortal } from "react-dom";
 import { fieldStyle, inputStyle, labelStyle } from "./common/inject-ui-common";
@@ -22,6 +22,7 @@ const KDS_PATCH_ORDER_STATUS_MESSAGE = "KDS_PATCH_ORDER_STATUS";
 const KDS_QUEUE_BAR_MOUNT_ID = "amodomio-kds-queue-bar-root";
 const KDS_QUEUE_BAR_SPACER_ID = "amodomio-kds-queue-bar-spacer";
 const DEFAULT_KDS_QUEUE_READ_ENDPOINT = "https://amodomio.com.br/api/kds/orders";
+const KDS_QUEUE_BAR_COLLAPSED_KEY = "amodomio-kds-queue-bar-collapsed";
 
 const commandContactByCard = new Map<string, { customerName: string; customerPhone: string }>();
 
@@ -475,6 +476,8 @@ function KdsQueueTopBar() {
     const [topOffset, setTopOffset] = useState(48);
     const [headerLeft, setHeaderLeft] = useState(0);
     const [headerWidth, setHeaderWidth] = useState<number | null>(null);
+    const [suspendedByOverlay, setSuspendedByOverlay] = useState(false);
+    const [collapsed, setCollapsed] = useState(() => readStorage(KDS_QUEUE_BAR_COLLAPSED_KEY) === "1");
     const [configOpen, setConfigOpen] = useState(false);
     const [cfgEndpoint, setCfgEndpoint] = useState("");
     const [cfgApiKey, setCfgApiKey] = useState("");
@@ -506,7 +509,62 @@ function KdsQueueTopBar() {
     }, []);
 
     useEffect(() => {
-        const BAR_HEIGHT = 30;
+        writeStorage(KDS_QUEUE_BAR_COLLAPSED_KEY, collapsed ? "1" : "");
+        const spacer = document.getElementById(KDS_QUEUE_BAR_SPACER_ID) as HTMLDivElement | null;
+        if (spacer) spacer.style.height = collapsed ? "0px" : "32px";
+        if (collapsed) setConfigOpen(false);
+    }, [collapsed]);
+
+    useEffect(() => {
+        const isVisible = (el: Element | null): el is HTMLElement => {
+            if (!(el instanceof HTMLElement)) return false;
+            const style = window.getComputedStyle(el);
+            if (style.display === "none" || style.visibility === "hidden" || Number(style.opacity) === 0) return false;
+            const rect = el.getBoundingClientRect();
+            return rect.width > 0 && rect.height > 0;
+        };
+
+        const hasBlockingOverlay = () => {
+            const selectors = [
+                "uib-modal-window",
+                ".modal.in",
+                ".modal.show",
+                ".modal.fade.in",
+                ".sweet-alert",
+                ".swal2-container",
+                "[role='dialog']",
+                ".dialog",
+                ".popover:has(input), .popover:has(textarea)"
+            ];
+            for (const selector of selectors) {
+                const nodes = document.querySelectorAll(selector);
+                for (const node of nodes) {
+                    if (!isVisible(node)) continue;
+                    const rect = (node as HTMLElement).getBoundingClientRect();
+                    if (rect.width < 200 || rect.height < 80) continue;
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        const update = () => setSuspendedByOverlay(hasBlockingOverlay());
+        update();
+
+        const obs = new MutationObserver(() => update());
+        obs.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["class", "style"] });
+        window.addEventListener("resize", update);
+        window.addEventListener("scroll", update, { passive: true });
+
+        return () => {
+            obs.disconnect();
+            window.removeEventListener("resize", update);
+            window.removeEventListener("scroll", update);
+        };
+    }, []);
+
+    useEffect(() => {
+        const BAR_HEIGHT = collapsed ? 0 : 30;
         const updateHeaderAnchor = () => {
             const headerEl =
                 document.querySelector<HTMLElement>("#header") ||
@@ -533,7 +591,7 @@ function KdsQueueTopBar() {
             window.removeEventListener("scroll", updateHeaderAnchor);
             window.clearInterval(timer);
         };
-    }, []);
+    }, [collapsed]);
 
     useEffect(() => {
         let cancelled = false;
@@ -664,9 +722,12 @@ function KdsQueueTopBar() {
                 top: topOffset,
                 left: headerLeft,
                 width: headerWidth ? `${headerWidth}px` : "100vw",
-                zIndex: 2147483000,
+                zIndex: suspendedByOverlay ? 1 : 2147483000,
                 padding: 0,
-                pointerEvents: "none"
+                pointerEvents: suspendedByOverlay ? "none" : "none",
+                opacity: suspendedByOverlay ? 0 : 1,
+                transform: suspendedByOverlay ? "translateY(-6px)" : "translateY(0)",
+                transition: "opacity 140ms ease, transform 140ms ease"
             }}
         >
             <div
@@ -675,25 +736,40 @@ function KdsQueueTopBar() {
                     border: "1px solid rgba(37,99,235,0.12)",
                     borderRadius: "0 0 8px 8px",
                     boxShadow: "0 2px 8px rgba(15,23,42,0.06)",
-                    padding: "0 6px",
+                    padding: collapsed ? "0 4px" : "0 6px",
                     margin: 0,
-                    pointerEvents: "auto"
+                    pointerEvents: "auto",
+                    marginLeft: collapsed ? "auto" : 0,
+                    width: collapsed ? "fit-content" : "100%"
                 }}
             >
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr auto", gap: 6, alignItems: "center" }}>
-                    <QueueColumn
-                        tone="amber"
-                        commandNumbers={snapshot.aguardandoForno}
-                        onCommandClick={handleFinalizeCommand}
-                        commandUiStateById={commandUiStateById}
-                    />
-                    <QueueColumn
-                        tone="orange"
-                        commandNumbers={snapshot.assando}
-                        onCommandClick={handleFinalizeCommand}
-                        commandUiStateById={commandUiStateById}
-                    />
-                    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4 }}>
+                <div
+                    style={{
+                        display: "grid",
+                        gridTemplateColumns: collapsed ? "auto" : "1fr 1fr auto",
+                        gap: 6,
+                        alignItems: "center"
+                    }}
+                >
+                    {!collapsed && (
+                        <QueueColumn
+                            tone="amber"
+                            commandNumbers={snapshot.aguardandoForno}
+                            onCommandClick={handleFinalizeCommand}
+                            commandUiStateById={commandUiStateById}
+                        />
+                    )}
+                    {!collapsed && (
+                        <QueueColumn
+                            tone="orange"
+                            commandNumbers={snapshot.assando}
+                            onCommandClick={handleFinalizeCommand}
+                            commandUiStateById={commandUiStateById}
+                        />
+                    )}
+                    <div style={{ position: "relative", display: "flex", alignItems: "center", gap: 4, justifySelf: "end" }}>
+                        {!collapsed && (
+                            <>
                         <span
                             title={
                                 status === "error"
@@ -751,6 +827,28 @@ function KdsQueueTopBar() {
                             }}
                         >
                             <Settings size={13} />
+                        </button>
+                            </>
+                        )}
+                        <button
+                            type="button"
+                            title={collapsed ? "Expandir barra KDS" : "Recolher barra KDS"}
+                            onClick={() => setCollapsed((prev) => !prev)}
+                            style={{
+                                border: "1px solid rgba(17,24,39,0.14)",
+                                background: "#fff",
+                                color: "#334155",
+                                width: 24,
+                                height: 24,
+                                borderRadius: 6,
+                                display: "inline-flex",
+                                alignItems: "center",
+                                justifyContent: "center",
+                                cursor: "pointer",
+                                padding: 0
+                            }}
+                        >
+                            {collapsed ? <ChevronLeft size={13} /> : <ChevronRight size={13} />}
                         </button>
                         {configOpen && (
                             <div
