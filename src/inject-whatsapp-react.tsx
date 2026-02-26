@@ -2,6 +2,8 @@
 import { MessageSquarePlus, Settings } from "lucide-react";
 import React, { useEffect, useRef, useState } from "react";
 import ReactDOM from "react-dom/client";
+import { baseMenuStyle, fieldStyle, inputStyle, labelStyle, useOutsideClick } from "./common/inject-ui-common";
+import { readStorage, writeStorage } from "./common/storage";
 
 declare const chrome: any;
 
@@ -25,6 +27,19 @@ const STORAGE_KEYS = {
     apiKey: "amodomio-zapi-api-key",
     operator: "amodomio-zapi-operator"
 };
+const DEFAULT_ZAPI_ENDPOINT = "https://amodomio.com.br/api/messages/text";
+
+type FeedbackKind = "info" | "success" | "error";
+type CardFeedback = {
+    kind: FeedbackKind;
+    message: string;
+    autoHideMs?: number;
+};
+
+type CardFeedbackController = {
+    show: (feedback: CardFeedback) => void;
+    clear: () => void;
+};
 
 /** Normaliza para E.164 (Brasil por padrão) */
 function toE164(text: string): string {
@@ -36,16 +51,20 @@ function toE164(text: string): string {
 
 function getStoredConfig() {
     return {
-        endpoint: (localStorage.getItem(STORAGE_KEYS.endpoint) || "").trim(),
-        apiKey: (localStorage.getItem(STORAGE_KEYS.apiKey) || "").trim(),
-        operator: (localStorage.getItem(STORAGE_KEYS.operator) || "").trim()
+<<<<<<< Updated upstream
+        endpoint: readStorage(STORAGE_KEYS.endpoint),
+=======
+        endpoint: readStorage(STORAGE_KEYS.endpoint) || DEFAULT_ZAPI_ENDPOINT,
+>>>>>>> Stashed changes
+        apiKey: readStorage(STORAGE_KEYS.apiKey),
+        operator: readStorage(STORAGE_KEYS.operator)
     };
 }
 
 function saveStoredConfig({ endpoint, apiKey, operator }: { endpoint: string; apiKey: string; operator?: string }) {
-    localStorage.setItem(STORAGE_KEYS.endpoint, endpoint.trim());
-    localStorage.setItem(STORAGE_KEYS.apiKey, apiKey.trim());
-    localStorage.setItem(STORAGE_KEYS.operator, (operator || "").trim());
+    writeStorage(STORAGE_KEYS.endpoint, endpoint);
+    writeStorage(STORAGE_KEYS.apiKey, apiKey);
+    writeStorage(STORAGE_KEYS.operator, operator || "");
 }
 
 async function sendViaBackground(
@@ -90,7 +109,15 @@ async function sendViaBackground(
 }
 
 /** Botão + dropdown de Respostas Rápidas */
-function QuickReplies({ phone, customerName }: { phone: string; customerName?: string }) {
+function QuickReplies({
+    phone,
+    customerName,
+    onCardFeedback
+}: {
+    phone: string;
+    customerName?: string;
+    onCardFeedback?: (feedback: CardFeedback) => void;
+}) {
     const [menu, setMenu] = useState<"quick" | "settings" | null>(null);
     const ref = useRef<HTMLDivElement | null>(null);
     const [endpoint, setEndpoint] = useState(() => getStoredConfig().endpoint);
@@ -99,23 +126,23 @@ function QuickReplies({ phone, customerName }: { phone: string; customerName?: s
     const [status, setStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [nameState, setNameState] = useState(() => (customerName || "").trim());
+    const errorTimerRef = useRef<number | null>(null);
 
-    useEffect(() => {
-        const onClickOutside = (e: MouseEvent) => {
-            if (!ref.current) return;
-            if (e.target instanceof Node && !ref.current.contains(e.target)) {
-                setMenu(null);
-            }
-        };
-        document.addEventListener("click", onClickOutside);
-        return () => document.removeEventListener("click", onClickOutside);
-    }, []);
+    useOutsideClick(ref, () => setMenu(null));
 
     useEffect(() => {
         if (customerName && customerName.trim()) {
             setNameState(customerName.trim());
         }
     }, [customerName]);
+
+    useEffect(() => {
+        return () => {
+            if (errorTimerRef.current) {
+                window.clearTimeout(errorTimerRef.current);
+            }
+        };
+    }, []);
 
     const btnStyle: React.CSSProperties = {
         display: "inline-flex",
@@ -131,19 +158,7 @@ function QuickReplies({ phone, customerName }: { phone: string; customerName?: s
         borderWidth: "0px"
     };
 
-    const menuStyle: React.CSSProperties = {
-        position: "absolute",
-        top: "36px",
-        left: 0,
-        background: "#fff",
-        color: "#111",
-        border: "1px solid rgba(0,0,0,0.12)",
-        borderRadius: 8,
-        boxShadow: "0 8px 24px rgba(0,0,0,0.12)",
-        minWidth: "240px",
-        zIndex: 9999999,
-        padding: "6px"
-    };
+    const menuStyle: React.CSSProperties = { ...baseMenuStyle, minWidth: "240px" };
 
     const itemStyle: React.CSSProperties = {
         padding: "8px 10px",
@@ -152,26 +167,6 @@ function QuickReplies({ phone, customerName }: { phone: string; customerName?: s
         fontSize: 12,
         lineHeight: "16px",
         userSelect: "none" as const
-    };
-
-    const fieldStyle: React.CSSProperties = {
-        display: "flex",
-        flexDirection: "column",
-        gap: "6px",
-        padding: "4px 2px"
-    };
-
-    const labelStyle: React.CSSProperties = {
-        fontSize: 11,
-        color: "#374151"
-    };
-
-    const inputStyle: React.CSSProperties = {
-        width: "100%",
-        borderRadius: 6,
-        border: "1px solid rgba(0,0,0,0.14)",
-        padding: "8px 10px",
-        fontSize: 12
     };
 
     const saveButtonStyle: React.CSSProperties = {
@@ -201,17 +196,36 @@ function QuickReplies({ phone, customerName }: { phone: string; customerName?: s
         return `${operatorPrefix}${greeting}${text}`;
     };
 
+    const publishCardFeedback = (feedback: CardFeedback) => {
+        onCardFeedback?.(feedback);
+    };
+
+    const showTransientError = (message: string, ms = 8000) => {
+        setErrorMsg(message);
+        if (errorTimerRef.current) {
+            window.clearTimeout(errorTimerRef.current);
+        }
+        errorTimerRef.current = window.setTimeout(() => {
+            setErrorMsg(null);
+            errorTimerRef.current = null;
+        }, ms);
+    };
+
     const handleSend = async (text: string) => {
         setStatus("sending");
         setErrorMsg(null);
+        publishCardFeedback({ kind: "info", message: "Enviando mensagem via Z-API..." });
         try {
             const finalMsg = buildMessage(text);
             await sendViaBackground(phone, finalMsg, { endpoint, apiKey });
             setStatus("ok");
+            publishCardFeedback({ kind: "success", message: "Mensagem enviada com sucesso.", autoHideMs: 7000 });
             setTimeout(() => setStatus("idle"), 1200);
         } catch (err) {
+            const msg = err instanceof Error ? err.message : "Falha ao enviar";
             setStatus("error");
-            setErrorMsg(err instanceof Error ? err.message : "Falha ao enviar");
+            showTransientError(msg);
+            publishCardFeedback({ kind: "error", message: `Falha no envio: ${msg}`, autoHideMs: 10000 });
             setTimeout(() => setStatus("idle"), 1500);
         } finally {
             setMenu(null);
@@ -219,7 +233,15 @@ function QuickReplies({ phone, customerName }: { phone: string; customerName?: s
     };
 
     const handleSave = () => {
+        if (!endpoint.trim() || !apiKey.trim()) {
+            const msg = "Configure endpoint e API key";
+            showTransientError(msg);
+            publishCardFeedback({ kind: "error", message: msg, autoHideMs: 8000 });
+            return;
+        }
         saveStoredConfig({ endpoint, apiKey, operator });
+        setErrorMsg(null);
+        publishCardFeedback({ kind: "success", message: "Configuração Z-API salva.", autoHideMs: 5000 });
         setMenu(null);
     };
 
@@ -290,7 +312,7 @@ function QuickReplies({ phone, customerName }: { phone: string; customerName?: s
                             value={endpoint}
                             onChange={(e) => setEndpoint(e.target.value)}
                             className="placeholder:text-muted-foreground"
-                            placeholder="https://amodomio.com.br/api/messages/text"
+                            placeholder={DEFAULT_ZAPI_ENDPOINT}
                         />
                     </div>
                     <div style={fieldStyle}>
@@ -324,7 +346,38 @@ function QuickReplies({ phone, customerName }: { phone: string; customerName?: s
                     <button type="button" style={saveButtonStyle} onClick={handleSave}>
                         Salvar
                     </button>
-                    {errorMsg && <div style={{ color: "#b91c1c", fontSize: 12, marginTop: 6 }}>{errorMsg}</div>}
+                    {errorMsg && (
+                        <div
+                            style={{
+                                color: "#b91c1c",
+                                fontSize: 12,
+                                marginTop: 6,
+                                display: "flex",
+                                alignItems: "flex-start",
+                                justifyContent: "space-between",
+                                gap: 8
+                            }}
+                        >
+                            <span style={{ flex: "1 1 auto" }}>{errorMsg}</span>
+                            <button
+                                type="button"
+                                title="Fechar mensagem"
+                                onClick={() => setErrorMsg(null)}
+                                style={{
+                                    border: 0,
+                                    background: "transparent",
+                                    color: "inherit",
+                                    cursor: "pointer",
+                                    padding: 0,
+                                    lineHeight: 1,
+                                    fontSize: 16,
+                                    fontWeight: 700
+                                }}
+                            >
+                                ×
+                            </button>
+                        </div>
+                    )}
                 </div>
             )}
         </div>
@@ -360,8 +413,123 @@ function mountOnCard(phoneEl: HTMLSpanElement) {
         cursor = cursor.parentElement;
     }
 
+
     const parent = phoneEl.parentElement;
     if (!parent) return;
+    const cardListItem = phoneEl.closest("li.kanban-sale") as HTMLElement | null;
+
+    let bannerEl: HTMLDivElement | null = null;
+    let bannerTextEl: HTMLDivElement | null = null;
+    let bannerCloseEl: HTMLButtonElement | null = null;
+    let bannerHideTimer: number | null = null;
+    const ensureBanner = () => {
+        if (bannerEl) return bannerEl;
+        if (!cardListItem) return null;
+        const existing = cardListItem.querySelector<HTMLDivElement>(".amodomio-zapi-feedback-banner");
+        if (existing) {
+            bannerEl = existing;
+            return bannerEl;
+        }
+        bannerEl = document.createElement("div");
+        bannerEl.className = "amodomio-zapi-feedback-banner";
+        Object.assign(bannerEl.style, {
+            display: "none",
+            marginTop: "6px",
+            padding: "8px 10px",
+            borderRadius: "8px",
+            fontSize: "12px",
+            lineHeight: "1.35",
+            border: "1px solid rgba(0,0,0,0.12)",
+            alignItems: "flex-start",
+            justifyContent: "space-between",
+            gap: "8px"
+        } as CSSStyleDeclaration);
+
+        bannerTextEl = document.createElement("div");
+        Object.assign(bannerTextEl.style, {
+            flex: "1 1 auto",
+            minWidth: "0"
+        } as CSSStyleDeclaration);
+
+        bannerCloseEl = document.createElement("button");
+        bannerCloseEl.type = "button";
+        bannerCloseEl.textContent = "×";
+        bannerCloseEl.title = "Fechar";
+        Object.assign(bannerCloseEl.style, {
+            flex: "0 0 auto",
+            border: "0",
+            background: "transparent",
+            color: "inherit",
+            cursor: "pointer",
+            padding: "0 2px",
+            lineHeight: "1",
+            fontSize: "16px",
+            fontWeight: "700"
+        } as CSSStyleDeclaration);
+        bannerCloseEl.onclick = (e) => {
+            e.stopPropagation();
+            if (bannerHideTimer) {
+                window.clearTimeout(bannerHideTimer);
+                bannerHideTimer = null;
+            }
+            if (bannerEl) bannerEl.style.display = "none";
+        };
+
+        bannerEl.appendChild(bannerTextEl);
+        bannerEl.appendChild(bannerCloseEl);
+
+        const cardNode = cardListItem.querySelector("sale-delivery-kanban-card");
+        if (cardNode?.parentElement) {
+            cardNode.parentElement.insertBefore(bannerEl, cardNode.nextSibling);
+        } else {
+            cardListItem.appendChild(bannerEl);
+        }
+        return bannerEl;
+    };
+
+    const setCardFeedback = ({ kind, message, autoHideMs }: CardFeedback) => {
+        const el = ensureBanner();
+        if (!el) return;
+        if (bannerHideTimer) {
+            window.clearTimeout(bannerHideTimer);
+            bannerHideTimer = null;
+        }
+
+        const palette =
+            kind === "success"
+                ? { bg: "#ecfdf5", text: "#065f46", border: "rgba(16,185,129,0.35)" }
+                : kind === "error"
+                  ? { bg: "#fef2f2", text: "#991b1b", border: "rgba(239,68,68,0.35)" }
+                  : { bg: "#eff6ff", text: "#1e3a8a", border: "rgba(59,130,246,0.35)" };
+
+        if (bannerTextEl) {
+            bannerTextEl.textContent = message;
+        }
+        el.style.display = "flex";
+        el.style.background = palette.bg;
+        el.style.color = palette.text;
+        el.style.borderColor = palette.border;
+
+        if (autoHideMs && autoHideMs > 0) {
+            bannerHideTimer = window.setTimeout(() => {
+                if (!bannerEl) return;
+                bannerEl.style.display = "none";
+            }, autoHideMs);
+        }
+    };
+    const clearCardFeedback = () => {
+        if (bannerHideTimer) {
+            window.clearTimeout(bannerHideTimer);
+            bannerHideTimer = null;
+        }
+        if (bannerEl) {
+            bannerEl.style.display = "none";
+        }
+    };
+    const cardFeedbackController: CardFeedbackController = {
+        show: setCardFeedback,
+        clear: clearCardFeedback
+    };
 
     // wrapper horizontal
     const wrapper = document.createElement("div");
@@ -388,7 +556,9 @@ function mountOnCard(phoneEl: HTMLSpanElement) {
 
     const qrMount = document.createElement("div");
     wrapper.appendChild(qrMount);
-    ReactDOM.createRoot(qrMount).render(<QuickReplies phone={phoneText} customerName={nameText} />);
+    ReactDOM.createRoot(qrMount).render(
+        <QuickReplies phone={phoneText} customerName={nameText} onCardFeedback={cardFeedbackController.show} />
+    );
 
     // coluna com telefone + (opcional) sales
     wrapper.appendChild(col);

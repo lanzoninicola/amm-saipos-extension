@@ -2,6 +2,7 @@
 import React from "react";
 import ReactDOM from "react-dom/client";
 import { initWhatsAppButtonsReact } from "./inject-whatsapp-react";
+import { initKdsSync } from "./inject-kds-sync";
 
 console.log("🚀 Content script iniciado");
 
@@ -18,6 +19,8 @@ ReactDOM.createRoot(container).render(
 
 // ✅ Inicializa botões de WhatsApp
 initWhatsAppButtonsReact();
+// ✅ Inicializa sync KDS
+initKdsSync();
 
 // ✅ Inicializa estilização do tempo de produção
 // initProductionTime();
