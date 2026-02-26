@@ -12,61 +12,22 @@ const PHONE_SELECTOR = 'span[data-qa="sale-customer-phone"]';
 const NAME_SELECTOR = 'span[data-qa="sale-name"]';
 const WRAPPER_CLASS = "amodomio-wapp-wrapper";
 const KDS_MARK_ATTR = "data-amodomio-kds";
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
 const DETAIL_SAVE_BUTTON_SELECTOR = 'button[ng-click="vm.save();"]';
 const DETAIL_MODAL_SELECTOR = ".modal-content";
 const DETAIL_SYNC_MARK_ATTR = "data-amodomio-kds-detail-sync";
 
 const commandContactByCard = new Map<string, { customerName: string; customerPhone: string }>();
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
 
 const KDS_STORAGE_KEYS = {
     endpoint: "amodomio-kds-endpoint",
     apiKey: "amodomio-kds-api-key",
-<<<<<<< HEAD
-<<<<<<< Updated upstream
     zonesEndpoint: "amodomio-kds-zones-endpoint"
-=======
-    zonesEndpoint: "amodomio-kds-zones-endpoint",
-    sizeKeyF: "amodomio-kds-size-key-f",
-    sizeKeyM: "amodomio-kds-size-key-m",
-    sizeKeyP: "amodomio-kds-size-key-p",
-    sizeKeyI: "amodomio-kds-size-key-i",
-    sizeKeyFT: "amodomio-kds-size-key-ft"
-};
-
-type KdsSizeIntegrationKeys = {
-    sizeF: string;
-    sizeM: string;
-    sizeP: string;
-    sizeI: string;
-    sizeFT: string;
-};
-
-const DEFAULT_SIZE_KEYS: KdsSizeIntegrationKeys = {
-    sizeF: "pizza-bigger",
-    sizeM: "pizza-medium",
-    sizeP: "pizza-small",
-    sizeI: "pizza-individual",
-    sizeFT: "pizza-slice"
->>>>>>> Stashed changes
-=======
-    zonesEndpoint: "amodomio-kds-zones-endpoint"
->>>>>>> kds-rest-api
 };
 
 function getStoredKdsConfig() {
     return {
         endpoint: readStorage(KDS_STORAGE_KEYS.endpoint),
         apiKey: readStorage(KDS_STORAGE_KEYS.apiKey),
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
->>>>>>> kds-rest-api
         zonesEndpoint: readStorage(KDS_STORAGE_KEYS.zonesEndpoint)
     };
 }
@@ -75,41 +36,6 @@ function saveStoredKdsConfig({ endpoint, apiKey, zonesEndpoint }: { endpoint: st
     writeStorage(KDS_STORAGE_KEYS.endpoint, endpoint);
     writeStorage(KDS_STORAGE_KEYS.apiKey, apiKey || "");
     writeStorage(KDS_STORAGE_KEYS.zonesEndpoint, zonesEndpoint || "");
-<<<<<<< HEAD
-=======
-        zonesEndpoint: readStorage(KDS_STORAGE_KEYS.zonesEndpoint),
-        sizeKeys: {
-            sizeF: readStorage(KDS_STORAGE_KEYS.sizeKeyF) || DEFAULT_SIZE_KEYS.sizeF,
-            sizeM: readStorage(KDS_STORAGE_KEYS.sizeKeyM) || DEFAULT_SIZE_KEYS.sizeM,
-            sizeP: readStorage(KDS_STORAGE_KEYS.sizeKeyP) || DEFAULT_SIZE_KEYS.sizeP,
-            sizeI: readStorage(KDS_STORAGE_KEYS.sizeKeyI) || DEFAULT_SIZE_KEYS.sizeI,
-            sizeFT: readStorage(KDS_STORAGE_KEYS.sizeKeyFT) || DEFAULT_SIZE_KEYS.sizeFT
-        } as KdsSizeIntegrationKeys
-    };
-}
-
-function saveStoredKdsConfig({
-    endpoint,
-    apiKey,
-    zonesEndpoint,
-    sizeKeys
-}: {
-    endpoint: string;
-    apiKey?: string;
-    zonesEndpoint?: string;
-    sizeKeys?: Partial<KdsSizeIntegrationKeys>;
-}) {
-    writeStorage(KDS_STORAGE_KEYS.endpoint, endpoint);
-    writeStorage(KDS_STORAGE_KEYS.apiKey, apiKey || "");
-    writeStorage(KDS_STORAGE_KEYS.zonesEndpoint, zonesEndpoint || "");
-    writeStorage(KDS_STORAGE_KEYS.sizeKeyF, sizeKeys?.sizeF || "");
-    writeStorage(KDS_STORAGE_KEYS.sizeKeyM, sizeKeys?.sizeM || "");
-    writeStorage(KDS_STORAGE_KEYS.sizeKeyP, sizeKeys?.sizeP || "");
-    writeStorage(KDS_STORAGE_KEYS.sizeKeyI, sizeKeys?.sizeI || "");
-    writeStorage(KDS_STORAGE_KEYS.sizeKeyFT, sizeKeys?.sizeFT || "");
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
 }
 
 async function sendKdsOrder(payload: Record<string, unknown>, config?: { endpoint: string; apiKey?: string }) {
@@ -121,15 +47,7 @@ async function sendKdsOrder(payload: Record<string, unknown>, config?: { endpoin
     const runtime = typeof chrome !== "undefined" && chrome?.runtime ? chrome.runtime : null;
     if (!runtime) throw new Error("chrome.runtime indisponível");
 
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-    return new Promise<{ ok: boolean }>((resolve, reject) => {
-=======
     return new Promise<{ ok: boolean; data?: unknown }>((resolve, reject) => {
->>>>>>> Stashed changes
-=======
-    return new Promise<{ ok: boolean }>((resolve, reject) => {
->>>>>>> kds-rest-api
         runtime.sendMessage(
             {
                 type: "KDS_ORDER",
@@ -137,15 +55,7 @@ async function sendKdsOrder(payload: Record<string, unknown>, config?: { endpoin
                 apiKey,
                 payload
             },
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-            (response: { error?: string }) => {
-=======
             (response: { error?: string; data?: unknown }) => {
->>>>>>> Stashed changes
-=======
-            (response: { error?: string }) => {
->>>>>>> kds-rest-api
                 const lastErr = runtime?.lastError;
                 if (lastErr) {
                     reject(new Error(lastErr.message));
@@ -155,15 +65,7 @@ async function sendKdsOrder(payload: Record<string, unknown>, config?: { endpoin
                     reject(new Error(response.error));
                     return;
                 }
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-                resolve({ ok: true });
-=======
                 resolve({ ok: true, data: response?.data });
->>>>>>> Stashed changes
-=======
-                resolve({ ok: true });
->>>>>>> kds-rest-api
             }
         );
     });
@@ -185,9 +87,6 @@ function deriveZonesEndpoint(endpoint: string): string {
     return `${endpoint.replace(/\/$/, "")}/delivery-zones`;
 }
 
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
 function parseNumberText(value?: string | null): number {
     if (!value) return 0;
     const clean = value.replace(/[^\d,.-]/g, "").replace(/\./g, "").replace(",", ".");
@@ -213,58 +112,13 @@ function inferExistsFromResponse(data: unknown): boolean {
 
 function inferSizeBucket(itemName: string): "sizeF" | "sizeM" | "sizeP" | "sizeI" | "sizeFT" | null {
     const normalized = itemName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
-    if (normalized.includes("fatia") || normalized.includes("slice") || normalized.includes("taglio")) return "sizeFT";
+    if (!normalized.includes("pizza")) return null;
+    if (normalized.includes("familia")) return "sizeF";
+    if (normalized.includes("media")) return "sizeM";
+    if (normalized.includes("pequena")) return "sizeP";
     if (normalized.includes("individual")) return "sizeI";
-    if (normalized.includes("pequena") || normalized.includes("small")) return "sizeP";
-    if (normalized.includes("media") || normalized.includes("medium")) return "sizeM";
-    if (normalized.includes("familia") || normalized.includes("grande") || normalized.includes("big")) return "sizeF";
+    if (normalized.includes("fatia") || normalized.includes("taglio")) return "sizeFT";
     return null;
-}
-
-function sizeCodeFromBucket(bucket: "sizeF" | "sizeM" | "sizeP" | "sizeI" | "sizeFT"): "F" | "M" | "P" | "I" | "FT" {
-    if (bucket === "sizeF") return "F";
-    if (bucket === "sizeM") return "M";
-    if (bucket === "sizeP") return "P";
-    if (bucket === "sizeI") return "I";
-    return "FT";
-}
-
-function buildPizzasPayload(
-    items: DetailExtractedItem[],
-    sizeKeys: KdsSizeIntegrationKeys
-): Array<{
-    sizeBucket: "sizeF" | "sizeM" | "sizeP" | "sizeI" | "sizeFT";
-    sizeCode: "F" | "M" | "P" | "I" | "FT";
-    sizeIntegrationKey: string;
-    quantity: number;
-    itemName: string;
-    flavors: Array<{ name: string }>;
-}> {
-    return items
-        .map((item) => {
-            const bucket = inferSizeBucket(item.itemName);
-            if (!bucket) return null;
-            return {
-                sizeBucket: bucket,
-                sizeCode: sizeCodeFromBucket(bucket),
-                sizeIntegrationKey: sizeKeys[bucket] || "",
-                quantity: item.qty,
-                itemName: item.itemName,
-                flavors: item.flavors.map((name) => ({ name }))
-            };
-        })
-        .filter(
-            (
-                item
-            ): item is {
-                sizeBucket: "sizeF" | "sizeM" | "sizeP" | "sizeI" | "sizeFT";
-                sizeCode: "F" | "M" | "P" | "I" | "FT";
-                sizeIntegrationKey: string;
-                quantity: number;
-                itemName: string;
-                flavors: Array<{ name: string }>;
-            } => item !== null
-        );
 }
 
 type DetailExtractedItem = {
@@ -350,58 +204,30 @@ function buildDetailDraft(modalEl: Element): KdsDetailDraft {
     };
 }
 
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
 export function KdsSyncButton({
     commandNumber,
     customerName,
     customerPhone,
     initialOrderAmountCents,
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-    openOnMount
-=======
     openOnMount,
     quickCardSyncOnly,
     buttonLabel,
     getDetailDraftOnOpen
->>>>>>> Stashed changes
-=======
-    openOnMount
->>>>>>> kds-rest-api
 }: {
     commandNumber?: string;
     customerName?: string;
     customerPhone?: string;
     initialOrderAmountCents?: number;
     openOnMount?: boolean;
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
     quickCardSyncOnly?: boolean;
     buttonLabel?: string;
     getDetailDraftOnOpen?: () => KdsDetailDraft;
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
 }) {
     const [modalOpen, setModalOpen] = useState(false);
     const [settingsOpen, setSettingsOpen] = useState(false);
     const [endpoint, setEndpoint] = useState(() => getStoredKdsConfig().endpoint);
     const [apiKey, setApiKey] = useState(() => getStoredKdsConfig().apiKey);
     const [zonesEndpoint, setZonesEndpoint] = useState(() => getStoredKdsConfig().zonesEndpoint);
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
-    const [sizeKeyF, setSizeKeyF] = useState(() => getStoredKdsConfig().sizeKeys.sizeF);
-    const [sizeKeyM, setSizeKeyM] = useState(() => getStoredKdsConfig().sizeKeys.sizeM);
-    const [sizeKeyP, setSizeKeyP] = useState(() => getStoredKdsConfig().sizeKeys.sizeP);
-    const [sizeKeyI, setSizeKeyI] = useState(() => getStoredKdsConfig().sizeKeys.sizeI);
-    const [sizeKeyFT, setSizeKeyFT] = useState(() => getStoredKdsConfig().sizeKeys.sizeFT);
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
     const [status, setStatus] = useState<"idle" | "sending" | "ok" | "error">("idle");
     const [errorMsg, setErrorMsg] = useState<string | null>(null);
     const [zones, setZones] = useState<DeliveryZone[]>([]);
@@ -425,21 +251,7 @@ export function KdsSyncButton({
     const [hoveredSegment, setHoveredSegment] = useState<string | null>(null);
     const [customerNameState, setCustomerNameState] = useState(customerName || "");
     const [customerPhoneState, setCustomerPhoneState] = useState(customerPhone || "");
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
     const [capturedItems, setCapturedItems] = useState<DetailExtractedItem[]>([]);
-
-    const sizeKeys: KdsSizeIntegrationKeys = {
-        sizeF: sizeKeyF.trim(),
-        sizeM: sizeKeyM.trim(),
-        sizeP: sizeKeyP.trim(),
-        sizeI: sizeKeyI.trim(),
-        sizeFT: sizeKeyFT.trim()
-    };
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
 
     useEffect(() => {
         if (openOnMount) setModalOpen(true);
@@ -447,17 +259,6 @@ export function KdsSyncButton({
 
     useEffect(() => {
         if (!modalOpen) return;
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
->>>>>>> kds-rest-api
-        setCommandValue(commandNumber || "");
-        setOrderAmountCents(Math.max(0, initialOrderAmountCents || 0));
-        setCustomerNameState(customerName || "");
-        setCustomerPhoneState(customerPhone || "");
-        setErrorMsg(null);
-<<<<<<< HEAD
-=======
         let detailDraft: KdsDetailDraft | null = null;
         let captureError: string | null = null;
         try {
@@ -476,9 +277,6 @@ export function KdsSyncButton({
         setSizeFT(detailDraft?.sizeFT || "0");
         setCapturedItems(detailDraft?.items || []);
         setErrorMsg(captureError);
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
         setStatus("idle");
 
         const loadZones = async () => {
@@ -521,15 +319,7 @@ export function KdsSyncButton({
         };
 
         loadZones();
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-    }, [modalOpen, commandNumber, initialOrderAmountCents, customerName, customerPhone, endpoint, apiKey, zonesEndpoint]);
-=======
     }, [modalOpen, commandNumber, initialOrderAmountCents, customerName, customerPhone, endpoint, apiKey, zonesEndpoint, getDetailDraftOnOpen]);
->>>>>>> Stashed changes
-=======
-    }, [modalOpen, commandNumber, initialOrderAmountCents, customerName, customerPhone, endpoint, apiKey, zonesEndpoint]);
->>>>>>> kds-rest-api
 
     const btnStyle: React.CSSProperties = {
         display: "inline-flex",
@@ -538,15 +328,7 @@ export function KdsSyncButton({
         width: 28,
         height: 28,
         borderRadius: 6,
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-        background: "#059669",
-=======
         background: status === "ok" ? "#047857" : status === "error" ? "#b91c1c" : "#059669",
->>>>>>> Stashed changes
-=======
-        background: "#059669",
->>>>>>> kds-rest-api
         color: "#fff",
         flex: "0 0 auto",
         cursor: "pointer",
@@ -567,15 +349,7 @@ export function KdsSyncButton({
     };
 
     const handleSave = () => {
-<<<<<<< HEAD
-<<<<<<< Updated upstream
         saveStoredKdsConfig({ endpoint, apiKey, zonesEndpoint });
-=======
-        saveStoredKdsConfig({ endpoint, apiKey, zonesEndpoint, sizeKeys });
->>>>>>> Stashed changes
-=======
-        saveStoredKdsConfig({ endpoint, apiKey, zonesEndpoint });
->>>>>>> kds-rest-api
         setSettingsOpen(false);
     };
 
@@ -737,23 +511,11 @@ export function KdsSyncButton({
                 deliveryZoneId: hasMoto ? deliveryZoneId || "" : "",
                 isCreditCard: paymentMethod === "credit" ? "on" : "",
                 customerName: customerNameState || "",
-<<<<<<< HEAD
-<<<<<<< Updated upstream
                 customerPhone: customerPhoneState || ""
-            };
-=======
-                customerPhone: customerPhoneState || "",
-                sizeIntegrationKeys: sizeKeys
             };
             if (capturedItems.length) {
                 payload.items = capturedItems;
-                payload.pizzas = buildPizzasPayload(capturedItems, sizeKeys);
             }
->>>>>>> Stashed changes
-=======
-                customerPhone: customerPhoneState || ""
-            };
->>>>>>> kds-rest-api
 
             await sendKdsOrder(payload, { endpoint, apiKey });
             setStatus("ok");
@@ -765,9 +527,6 @@ export function KdsSyncButton({
         }
     };
 
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
     const handleCardPhoneSync = async () => {
         if (!commandValue) {
             setStatus("error");
@@ -816,30 +575,10 @@ export function KdsSyncButton({
         }
     };
 
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
     return (
         <div style={{ position: "relative" }}>
             <button
                 type="button"
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
->>>>>>> kds-rest-api
-                title={`Sincronizar pedido no KDS (${status})`}
-                style={btnStyle}
-                onClick={(e) => {
-                    e.stopPropagation();
-                    setModalOpen(true);
-                }}
-            >
-                <RefreshCw size={16} />
-            </button>
-
-            {modalOpen &&
-<<<<<<< HEAD
-=======
                 title={
                     quickCardSyncOnly
                         ? `Atualizar telefone no KDS (${status})`
@@ -875,9 +614,6 @@ export function KdsSyncButton({
 
             {!quickCardSyncOnly &&
                 modalOpen &&
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
                 createPortal(
                     <div
                         style={{
@@ -1172,9 +908,6 @@ export function KdsSyncButton({
                                 />
                             </div>
                         </div>
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
                         {capturedItems.length > 0 && (
                             <div style={{ marginBottom: 10, border: "1px solid rgba(17,24,39,0.15)", borderRadius: 8, padding: 8 }}>
                                 <div style={{ fontSize: 12, fontWeight: 700, marginBottom: 6 }}>Itens capturados do detalhe</div>
@@ -1192,9 +925,6 @@ export function KdsSyncButton({
                                 </div>
                             </div>
                         )}
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
 
                         <button
                             type="button"
@@ -1259,80 +989,6 @@ export function KdsSyncButton({
                                         placeholder="api-key"
                                     />
                                 </div>
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
-                                <div style={{ fontWeight: 600, fontSize: 12, margin: "8px 0 4px" }}>Chaves integração tamanhos pizza</div>
-                                <div style={{ display: "grid", gridTemplateColumns: "repeat(2, minmax(0, 1fr))", gap: 10 }}>
-                                    <div style={fieldStyle}>
-                                        <label style={labelStyle} htmlFor="kds-size-key-f">
-                                            Tamanho F
-                                        </label>
-                                        <input
-                                            id="kds-size-key-f"
-                                            type="text"
-                                            style={inputStyle}
-                                            value={sizeKeyF}
-                                            onChange={(e) => setSizeKeyF(e.target.value)}
-                                            placeholder="ex: TAM_FAMILIA"
-                                        />
-                                    </div>
-                                    <div style={fieldStyle}>
-                                        <label style={labelStyle} htmlFor="kds-size-key-m">
-                                            Tamanho M
-                                        </label>
-                                        <input
-                                            id="kds-size-key-m"
-                                            type="text"
-                                            style={inputStyle}
-                                            value={sizeKeyM}
-                                            onChange={(e) => setSizeKeyM(e.target.value)}
-                                            placeholder="ex: TAM_MEDIA"
-                                        />
-                                    </div>
-                                    <div style={fieldStyle}>
-                                        <label style={labelStyle} htmlFor="kds-size-key-p">
-                                            Tamanho P
-                                        </label>
-                                        <input
-                                            id="kds-size-key-p"
-                                            type="text"
-                                            style={inputStyle}
-                                            value={sizeKeyP}
-                                            onChange={(e) => setSizeKeyP(e.target.value)}
-                                            placeholder="ex: TAM_PEQUENA"
-                                        />
-                                    </div>
-                                    <div style={fieldStyle}>
-                                        <label style={labelStyle} htmlFor="kds-size-key-i">
-                                            Tamanho I
-                                        </label>
-                                        <input
-                                            id="kds-size-key-i"
-                                            type="text"
-                                            style={inputStyle}
-                                            value={sizeKeyI}
-                                            onChange={(e) => setSizeKeyI(e.target.value)}
-                                            placeholder="ex: TAM_INDIVIDUAL"
-                                        />
-                                    </div>
-                                    <div style={fieldStyle}>
-                                        <label style={labelStyle} htmlFor="kds-size-key-ft">
-                                            Tamanho FT
-                                        </label>
-                                        <input
-                                            id="kds-size-key-ft"
-                                            type="text"
-                                            style={inputStyle}
-                                            value={sizeKeyFT}
-                                            onChange={(e) => setSizeKeyFT(e.target.value)}
-                                            placeholder="ex: TAM_FATIA"
-                                        />
-                                    </div>
-                                </div>
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
                                 <button type="button" style={saveButtonStyle} onClick={handleSave}>
                                     Salvar
                                 </button>
@@ -1402,9 +1058,6 @@ function extractOrderAmountCentsFromCard(anchorEl: HTMLElement | null): number {
     return 0;
 }
 
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
 function mountKdsOnDetailSaveButton(saveButton: HTMLButtonElement) {
     const modal = saveButton.closest(DETAIL_MODAL_SELECTOR);
     if (!modal) return;
@@ -1423,9 +1076,6 @@ function mountKdsOnDetailSaveButton(saveButton: HTMLButtonElement) {
     modal.setAttribute(DETAIL_SYNC_MARK_ATTR, "1");
 }
 
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
 function mountKdsOnCard(phoneEl: HTMLSpanElement) {
     const wrapper = phoneEl.closest<HTMLElement>(`.${WRAPPER_CLASS}`);
     if (!wrapper) return;
@@ -1445,29 +1095,17 @@ function mountKdsOnCard(phoneEl: HTMLSpanElement) {
     const initialOrderAmountCents = extractOrderAmountCentsFromCard(phoneEl);
     const customerName = extractCustomerNameFromCard(phoneEl);
     const customerPhone = phoneEl.textContent?.trim() || "";
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
     if (commandNumber) {
         commandContactByCard.set(commandNumber, { customerName, customerPhone });
     }
 
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
     ReactDOM.createRoot(kdsMount).render(
         <KdsSyncButton
             commandNumber={commandNumber}
             customerName={customerName}
             customerPhone={customerPhone}
             initialOrderAmountCents={initialOrderAmountCents}
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
             quickCardSyncOnly
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
         />
     );
     wrapper.setAttribute(KDS_MARK_ATTR, "1");
@@ -1475,13 +1113,7 @@ function mountKdsOnCard(phoneEl: HTMLSpanElement) {
 
 function scanAll() {
     document.querySelectorAll<HTMLSpanElement>(PHONE_SELECTOR).forEach((el) => mountKdsOnCard(el));
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
     document.querySelectorAll<HTMLButtonElement>(DETAIL_SAVE_BUTTON_SELECTOR).forEach((btn) => mountKdsOnDetailSaveButton(btn));
->>>>>>> Stashed changes
-=======
->>>>>>> kds-rest-api
 }
 
 export function initKdsSync() {
@@ -1529,12 +1161,6 @@ export function initKdsSync() {
                 if (el.matches?.(PHONE_SELECTOR)) {
                     mountKdsOnCard(el as HTMLSpanElement);
                 }
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-                el.querySelectorAll?.<HTMLSpanElement>(PHONE_SELECTOR).forEach((span) => {
-                    mountKdsOnCard(span);
-                });
-=======
                 if (el.matches?.(DETAIL_SAVE_BUTTON_SELECTOR)) {
                     mountKdsOnDetailSaveButton(el as HTMLButtonElement);
                 }
@@ -1544,12 +1170,6 @@ export function initKdsSync() {
                 el.querySelectorAll?.<HTMLButtonElement>(DETAIL_SAVE_BUTTON_SELECTOR).forEach((btn) => {
                     mountKdsOnDetailSaveButton(btn);
                 });
->>>>>>> Stashed changes
-=======
-                el.querySelectorAll?.<HTMLSpanElement>(PHONE_SELECTOR).forEach((span) => {
-                    mountKdsOnCard(span);
-                });
->>>>>>> kds-rest-api
             });
         }
     });

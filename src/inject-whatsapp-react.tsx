@@ -51,15 +51,7 @@ function toE164(text: string): string {
 
 function getStoredConfig() {
     return {
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-        endpoint: readStorage(STORAGE_KEYS.endpoint),
-=======
         endpoint: readStorage(STORAGE_KEYS.endpoint) || DEFAULT_ZAPI_ENDPOINT,
->>>>>>> Stashed changes
-=======
-        endpoint: readStorage(STORAGE_KEYS.endpoint),
->>>>>>> kds-rest-api
         apiKey: readStorage(STORAGE_KEYS.apiKey),
         operator: readStorage(STORAGE_KEYS.operator)
     };
@@ -503,8 +495,8 @@ function mountOnCard(phoneEl: HTMLSpanElement) {
             kind === "success"
                 ? { bg: "#ecfdf5", text: "#065f46", border: "rgba(16,185,129,0.35)" }
                 : kind === "error"
-                  ? { bg: "#fef2f2", text: "#991b1b", border: "rgba(239,68,68,0.35)" }
-                  : { bg: "#eff6ff", text: "#1e3a8a", border: "rgba(59,130,246,0.35)" };
+                    ? { bg: "#fef2f2", text: "#991b1b", border: "rgba(239,68,68,0.35)" }
+                    : { bg: "#eff6ff", text: "#1e3a8a", border: "rgba(59,130,246,0.35)" };
 
         if (bannerTextEl) {
             bannerTextEl.textContent = message;
