@@ -168,6 +168,40 @@ async function sendViaBackground(
     });
 }
 
+async function testRestApiViaBackground(config: {
+    endpoint: string;
+    apiKey?: string;
+    method?: "GET" | "POST" | "PATCH";
+    body?: Record<string, unknown>;
+}) {
+    const runtime = typeof chrome !== "undefined" && chrome?.runtime ? chrome.runtime : null;
+    if (!runtime) throw new Error("chrome.runtime indisponível");
+
+    return new Promise<{ ok: boolean; status?: number; data?: unknown }>((resolve, reject) => {
+        runtime.sendMessage(
+            {
+                type: "REST_API_TEST",
+                endpoint: config.endpoint.trim(),
+                apiKey: (config.apiKey || "").trim(),
+                method: config.method || "GET",
+                body: config.body
+            },
+            (response: { error?: string; data?: unknown; status?: number }) => {
+                const lastErr = runtime?.lastError;
+                if (lastErr) {
+                    reject(new Error(lastErr.message));
+                    return;
+                }
+                if (response?.error) {
+                    reject(new Error(response.error));
+                    return;
+                }
+                resolve({ ok: true, status: response?.status, data: response?.data });
+            }
+        );
+    });
+}
+
 /** Botão + dropdown de Respostas Rápidas */
 function QuickReplies({
     phone,
@@ -339,6 +373,49 @@ function QuickReplies({
         publishCardFeedback({ kind: "success", message: "Configuração KDS salva.", autoHideMs: 5000 });
     };
 
+    const handleTestZapi = async () => {
+        if (!endpoint.trim() || !apiKey.trim()) {
+            setSettingsFeedback({ kind: "error", message: "Preencha endpoint e API key da Z-API para testar." });
+            return;
+        }
+        setSettingsFeedback({ kind: "success", message: "Testando Z-API..." });
+        try {
+            const result = await testRestApiViaBackground({
+                endpoint,
+                apiKey,
+                method: "GET"
+            });
+            setSettingsFeedback({ kind: "success", message: `Z-API OK${result.status ? ` (${result.status})` : ""}` });
+        } catch (err) {
+            setSettingsFeedback({ kind: "error", message: err instanceof Error ? err.message : "Falha no teste Z-API" });
+        }
+    };
+
+    const handleTestKds = async () => {
+        const effectiveQueueEndpoint = kdsQueueEndpoint.trim() || DEFAULT_KDS_QUEUE_READ_ENDPOINT;
+        if (!effectiveQueueEndpoint || !kdsApiKey.trim()) {
+            setSettingsFeedback({ kind: "error", message: "Preencha endpoint de leitura e API key do KDS para testar." });
+            return;
+        }
+        setSettingsFeedback({ kind: "success", message: "Testando KDS..." });
+        try {
+            const safeDate = normalizeKdsReadDate(kdsQueueDate);
+            let finalEndpoint = effectiveQueueEndpoint;
+            if (safeDate) {
+                const joiner = finalEndpoint.includes("?") ? "&" : "?";
+                finalEndpoint = `${finalEndpoint}${joiner}date=${encodeURIComponent(safeDate)}`;
+            }
+            const result = await testRestApiViaBackground({
+                endpoint: finalEndpoint,
+                apiKey: kdsApiKey,
+                method: "GET"
+            });
+            setSettingsFeedback({ kind: "success", message: `KDS OK${result.status ? ` (${result.status})` : ""}` });
+        } catch (err) {
+            setSettingsFeedback({ kind: "error", message: err instanceof Error ? err.message : "Falha no teste KDS" });
+        }
+    };
+
     const toggleSettingsSection = (section: "zapi" | "kds") => {
         setSettingsOpenSections((prev) => ({ ...prev, [section]: !prev[section] }));
     };
@@ -467,6 +544,13 @@ function QuickReplies({
                                 <button type="button" style={saveButtonStyle} onClick={handleSave}>
                                     Salvar Z-API
                                 </button>
+                                <button
+                                    type="button"
+                                    style={{ ...saveButtonStyle, marginTop: 6, background: "#334155" }}
+                                    onClick={handleTestZapi}
+                                >
+                                    Testar Z-API
+                                </button>
                             </div>
                         )}
                     </div>
@@ -582,6 +666,13 @@ function QuickReplies({
                                 </div>
                                 <button type="button" style={{ ...saveButtonStyle, background: "#059669" }} onClick={handleSaveKds}>
                                     Salvar KDS
+                                </button>
+                                <button
+                                    type="button"
+                                    style={{ ...saveButtonStyle, marginTop: 6, background: "#334155" }}
+                                    onClick={handleTestKds}
+                                >
+                                    Testar KDS
                                 </button>
                             </div>
                         )}

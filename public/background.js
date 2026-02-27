@@ -192,4 +192,36 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
 
     return true;
   }
+
+  if (request.type === "REST_API_TEST") {
+    const { endpoint, apiKey, method, body } = request;
+
+    if (!endpoint) {
+      sendResponse({ error: "Endpoint ausente" });
+      return;
+    }
+
+    fetch(endpoint, {
+      method: method || "GET",
+      headers: {
+        ...(apiKey ? { "x-api-key": apiKey } : {}),
+        ...(body ? { "Content-Type": "application/json" } : {})
+      },
+      ...(body ? { body: JSON.stringify(body) } : {})
+    })
+      .then(async (res) => {
+        const text = await res.text();
+        return { ok: res.ok, status: res.status, statusText: res.statusText, data: parseTextResponse(text) };
+      })
+      .then(({ ok, status, statusText, data }) => {
+        if (!ok) {
+          sendResponse({ error: extractErrorMessage(data, `Teste falhou (${status} ${statusText || ""})`.trim()), status, data });
+          return;
+        }
+        sendResponse({ data, status });
+      })
+      .catch((error) => sendResponse({ error: error.message }));
+
+    return true;
+  }
 });
